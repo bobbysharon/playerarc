@@ -31,9 +31,9 @@ const { demoRequest, demoPlayersCsv } = m;
 const out=[];
 const t=async(n,f)=>{try{out.push([(await f())?'PASS':'FAIL',n]);}catch(e){out.push(['ERR ',n+' → '+e.message]);}};
 
-await t('login', async()=>{const r=await demoRequest('POST','/auth/login',{email:'admin@karwansc.com',password:'Karwan@2026'});return !!r.token&&r.user.role==='super_admin';});
-await t('bad password rejected', async()=>{try{await demoRequest('POST','/auth/login',{email:'admin@karwansc.com',password:'wrong'});return false;}catch(e){return e.status===401;}});
-await demoRequest('POST','/auth/login',{email:'admin@karwansc.com',password:'Karwan@2026'});
+await t('login', async()=>{const r=await demoRequest('POST','/auth/login',{email:'admin@karwansportsclub.com',password:'Karwan@2026'});return !!r.token&&r.user.role==='super_admin';});
+await t('bad password rejected', async()=>{try{await demoRequest('POST','/auth/login',{email:'admin@karwansportsclub.com',password:'wrong'});return false;}catch(e){return e.status===401;}});
+await demoRequest('POST','/auth/login',{email:'admin@karwansportsclub.com',password:'Karwan@2026'});
 await t('dashboard', async()=>(await demoRequest('GET','/dashboard')).totals.athletes===46);
 await t('sports+config', async()=>{const r=await demoRequest('GET','/sports');return r.sports.length===7&&r.sports[0].config.matchStats.length>0;});
 await t('players list+pagination', async()=>{const r=await demoRequest('GET','/players?pageSize=10');return r.players.length===10&&r.total===46&&r.players[0].sports;});
@@ -87,12 +87,69 @@ await t('invalid stats rejected', async()=>{
   try{await demoRequest('PUT','/matches/'+mid+'/performances',{performances:[{player_id:md.lineup[0].player_id,stats:{runs:900,balls_faced:1,shots:1,shots_on_target:9}}]});return false;}catch(e){return e.status===422;}
 });
 
+// user management
+await t('create + sign in as new user', async()=>{
+  await demoRequest('POST','/auth/login',{email:'admin@karwansportsclub.com',password:'Karwan@2026'});
+  const r=await demoRequest('POST','/admin/users',{full_name:'Temp Coach',email:'temp@karwansportsclub.com',password:'Temporary123',role:'coach',teamIds:[1]});
+  const l=await demoRequest('POST','/auth/login',{email:'temp@karwansportsclub.com',password:'Karwan@2026'});
+  return r.ok && l.user.role==='coach';
+});
+await t('generate password + forced change', async()=>{
+  await demoRequest('POST','/auth/login',{email:'admin@karwansportsclub.com',password:'Karwan@2026'});
+  const u=(await demoRequest('GET','/admin/users')).users.find(x=>x.email==='temp@karwansportsclub.com');
+  const r=await demoRequest('POST',`/admin/users/${u.id}/password`,{mustChange:true});
+  const l=await demoRequest('POST','/auth/login',{email:'temp@karwansportsclub.com',password:r.password});
+  return r.generated && l.user.mustChangePassword===true;
+});
+await t('user changes their own password', async()=>{
+  await demoRequest('POST','/auth/login',{email:'admin@karwansportsclub.com',password:'Karwan@2026'});
+  const u=(await demoRequest('GET','/admin/users')).users.find(x=>x.email==='temp@karwansportsclub.com');
+  await demoRequest('POST',`/admin/users/${u.id}/password`,{password:'KnownPass123',mustChange:true});
+  await demoRequest('POST','/auth/login',{email:'temp@karwansportsclub.com',password:'KnownPass123'});
+  await demoRequest('POST','/auth/change-password',{currentPassword:'KnownPass123',newPassword:'MyOwnPass456'});
+  const l=await demoRequest('POST','/auth/login',{email:'temp@karwansportsclub.com',password:'MyOwnPass456'});
+  return l.user.mustChangePassword===false;
+});
+await t('cannot delete own account', async()=>{
+  await demoRequest('POST','/auth/login',{email:'admin@karwansportsclub.com',password:'Karwan@2026'});
+  const me=(await demoRequest('GET','/admin/users')).users.find(x=>x.email==='admin@karwansportsclub.com');
+  try{await demoRequest('DELETE',`/admin/users/${me.id}`);return false;}catch(e){return e.status===409;}
+});
+await t('delete a user', async()=>{
+  const u=(await demoRequest('GET','/admin/users')).users.find(x=>x.email==='temp@karwansportsclub.com');
+  return (await demoRequest('DELETE',`/admin/users/${u.id}`)).ok;
+});
+await t('no password ever leaves the user list', async()=>{
+  const s=JSON.stringify(await demoRequest('GET','/admin/users'));
+  return !s.includes('password_hash') && !s.includes('"password"');
+});
+
+// athlete assignments
+await t('assign staff to an athlete', async()=>(await demoRequest('POST','/players/1/staff',{coach_id:1,role:'personal_trainer'})).ok);
+await t('duplicate staff refused', async()=>{
+  try{await demoRequest('POST','/players/1/staff',{coach_id:1,role:'personal_trainer'});return false;}catch(e){return e.status===409;}
+});
+await t('staff shows on profile', async()=>(await demoRequest('GET','/players/1')).staff.some(x=>x.role==='personal_trainer'));
+await t('end staff assignment, keep the row', async()=>{
+  const a=(await demoRequest('GET','/players/1')).staff.find(x=>!x.end_date);
+  await demoRequest('PUT',`/players/1/staff/${a.id}`,{end_date:new Date().toISOString().slice(0,10)});
+  return (await demoRequest('GET','/players/1')).staff.some(x=>x.id===a.id&&x.end_date);
+});
+await t('assign athlete to a team from their profile', async()=>{
+  const before=(await demoRequest('GET','/players/1')).teamHistory.length;
+  const teams=(await demoRequest('GET','/teams')).teams;
+  const on=new Set((await demoRequest('GET','/players/1')).teamHistory.map(x=>x.team_id));
+  const free=teams.find(x=>!on.has(x.id));
+  await demoRequest('POST',`/teams/${free.id}/members`,{player_id:1,role:'player'});
+  return (await demoRequest('GET','/players/1')).teamHistory.length===before+1;
+});
+
 // scoping
-await demoRequest('POST','/auth/login',{email:'coach.cricket@karwansc.com',password:'Karwan@2026'});
+await demoRequest('POST','/auth/login',{email:'coach.cricket@karwansportsclub.com',password:'Karwan@2026'});
 await t('coach scoped athlete list', async()=>{const r=await demoRequest('GET','/players?pageSize=100');return r.total>0&&r.total<46;});
 await t('coach fields redacted', async()=>(await demoRequest('GET','/players?pageSize=1')).players[0]._redacted===true);
 await t('coach cannot register', async()=>{try{await demoRequest('POST','/players',{first_name:'No',last_name:'Way'});return false;}catch(e){return e.status===403;}});
-await demoRequest('POST','/auth/login',{email:'player@karwansc.com',password:'Karwan@2026'});
+await demoRequest('POST','/auth/login',{email:'player@karwansportsclub.com',password:'Karwan@2026'});
 await t('player sees only self', async()=>(await demoRequest('GET','/players?pageSize=50')).total===1);
 
 console.log(out.map(([s,n])=>s+'  '+n).join('\n'));

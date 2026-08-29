@@ -1,6 +1,7 @@
 'use strict';
 const express = require('express');
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const { z } = require('zod');
 const { db, parseJson, tx } = require('../db');
 const { requireAuth, requirePermission } = require('../middleware/auth');
@@ -23,6 +24,11 @@ router.get('/users', adminOnly, (req, res) => {
       sportIds: db.prepare('SELECT sport_id FROM user_sport_scopes WHERE user_id = ?').all(u.id).map((r) => r.sport_id),
       teamIds: db.prepare('SELECT team_id FROM user_team_scopes WHERE user_id = ?').all(u.id).map((r) => r.team_id),
       playerIds: db.prepare('SELECT player_id FROM user_player_links WHERE user_id = ?').all(u.id).map((r) => r.player_id),
+      players: db
+        .prepare(`SELECT p.id, p.athlete_id, p.first_name, p.last_name, l.relationship
+                  FROM user_player_links l JOIN players p ON p.id = l.player_id WHERE l.user_id = ?`)
+        .all(u.id),
+      coach: db.prepare('SELECT id, full_name, role FROM coaches WHERE user_id = ?').get(u.id) || null,
     }));
   res.json({ users, roles: ROLES.map((r) => ({ ...r, permissions: permissionsFor(r.key) })) });
 });
@@ -83,6 +89,11 @@ router.put('/users/:id', adminOnly, asyncHandler(async (req, res) => {
   }
   if (sets.length) db.prepare(`UPDATE users SET ${sets.join(', ')}, updated_at = datetime('now') WHERE id = ?`).run(...params, before.id);
 
+  if ('coachId' in body) {
+    db.prepare('UPDATE coaches SET user_id = NULL WHERE user_id = ?').run(before.id);
+    if (body.coachId) db.prepare('UPDATE coaches SET user_id = ? WHERE id = ?').run(before.id, body.coachId);
+  }
+
   tx(() => {
     if (body.sportIds) {
       db.prepare('DELETE FROM user_sport_scopes WHERE user_id = ?').run(before.id);
@@ -102,6 +113,71 @@ router.put('/users/:id', adminOnly, asyncHandler(async (req, res) => {
   audit(req, { action: 'update', entity: 'users', entityId: before.id, summary: `User updated: ${before.email}` });
   res.json({ ok: true });
 }));
+
+
+/**
+ * Remove a user. Two things are refused outright: deleting yourself, and
+ * removing the last super admin — either would lock the club out of its own
+ * platform. Suspending is offered instead of deleting where history matters.
+ */
+router.delete('/users/:id', adminOnly, asyncHandler(async (req, res) => {
+  const user = db
+    .prepare('SELECT u.*, r.key AS role FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = ?')
+    .get(req.params.id);
+  if (!user) throw new ApiError(404, 'That user does not exist.');
+  if (user.id === req.user.id) throw new ApiError(409, 'You cannot delete the account you are signed in with.');
+  if (user.role === 'super_admin') {
+    const remaining = db
+      .prepare(`SELECT COUNT(*) AS c FROM users u JOIN roles r ON r.id = u.role_id
+                WHERE r.key = 'super_admin' AND u.status = 'active' AND u.id != ?`)
+      .get(user.id).c;
+    if (remaining === 0) throw new ApiError(409, 'This is the last active super admin. Promote another account first.');
+  }
+  db.prepare('DELETE FROM users WHERE id = ?').run(user.id);
+  audit(req, { action: 'delete', entity: 'users', entityId: user.id, summary: `User deleted: ${user.email}`, before: { email: user.email, role: user.role } });
+  res.json({ ok: true });
+}));
+
+/**
+ * Set or generate a password.
+ *
+ * Stored passwords are bcrypt hashes and cannot be read back — not by an
+ * administrator, not by anyone. What an administrator can do is issue a new
+ * one. Pass a password to set it, or omit it to have a strong one generated
+ * and returned once in this response so it can be handed over.
+ */
+router.post('/users/:id/password', adminOnly, asyncHandler(async (req, res) => {
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
+  if (!user) throw new ApiError(404, 'That user does not exist.');
+
+  const schema = z.object({
+    password: z.string().min(8, 'Use at least 8 characters').optional(),
+    mustChange: z.coerce.boolean().default(true),
+  });
+  const body = schema.parse(req.body);
+
+  const password = body.password || generatePassword();
+  const hash = await bcrypt.hash(password, 10);
+  db.prepare(`UPDATE users SET password_hash = ?, must_change_password = ?, updated_at = datetime('now') WHERE id = ?`)
+    .run(hash, body.mustChange ? 1 : 0, user.id);
+
+  audit(req, {
+    action: 'update',
+    entity: 'users',
+    entityId: user.id,
+    summary: `Password ${body.password ? 'set' : 'generated'} for ${user.email}${body.mustChange ? ' (must change at next sign-in)' : ''}`,
+  });
+
+  // Returned once, never stored in readable form.
+  res.json({ ok: true, password, mustChange: !!body.mustChange, generated: !body.password });
+}));
+
+/** A readable but strong password an administrator can pass on verbally. */
+function generatePassword() {
+  const words = ['Falcon', 'Summit', 'Harbour', 'Cypress', 'Kestrel', 'Lantern', 'Meridian', 'Quarry', 'Thistle', 'Vantage'];
+  const pick = () => words[crypto.randomInt(words.length)];
+  return `${pick()}-${pick()}-${String(crypto.randomInt(1000, 9999))}`;
+}
 
 /* ---- Audit log ------------------------------------------------------ */
 router.get('/audit', requirePermission('audit.read'), (req, res) => {

@@ -23,6 +23,13 @@ import { ROLES, permissionsFor, can, redactPlayer } from './engine/permissions.j
 
 export const DEMO_PASSWORD = 'Karwan@2026';
 
+/**
+ * The demo has no server, so it cannot hash. It keeps passwords in memory for
+ * the life of the page instead, which is enough to demonstrate the reset flow
+ * end to end and is why this build is not for real use.
+ */
+let passwords = {};
+
 /* ------------------------------------------------------------------ */
 /* Store                                                               */
 /* ------------------------------------------------------------------ */
@@ -33,8 +40,11 @@ let session = null;
 function reset() {
   db = JSON.parse(JSON.stringify(dataset));
   if (!db.audit_logs) db.audit_logs = [];
+  passwords = {};
   session = null;
 }
+
+const passwordFor = (userId) => passwords[userId] ?? DEMO_PASSWORD;
 reset();
 
 const all = (t) => db[t] || [];
@@ -309,6 +319,7 @@ function profileFor(user) {
     role: user.role,
     roleName: user.role_name,
     avatarUrl: user.avatar_url,
+    mustChangePassword: !!user.must_change_password,
     permissions: permissionsFor(user.role),
     sportIds: user.sportIds,
     teamIds: user.teamIds,
@@ -386,7 +397,7 @@ const route = (method, pattern, handler) => ROUTES.push({ method, pattern, handl
 /* ---- Auth ---- */
 route('POST', /^\/auth\/login$/, (_, body) => {
   const row = find('users', (u) => u.email.toLowerCase() === String(body.email || '').toLowerCase());
-  if (!row || body.password !== DEMO_PASSWORD) {
+  if (!row || body.password !== passwordFor(row.id)) {
     audit('login_failed', 'users', null, `Failed sign-in for ${body.email}`);
     fail(401, 'Email or password is incorrect.');
   }
@@ -399,9 +410,15 @@ route('POST', /^\/auth\/login$/, (_, body) => {
 route('GET', /^\/auth\/me$/, () => ({ user: profileFor(requireAuth()) }));
 route('GET', /^\/auth\/roles$/, () => ({ roles: ROLES.map((r) => ({ ...r, permissions: permissionsFor(r.key) })) }));
 route('POST', /^\/auth\/change-password$/, (_, body) => {
-  requireAuth();
-  if (body.currentPassword !== DEMO_PASSWORD) fail(400, 'Current password is incorrect.');
-  fail(403, 'Passwords cannot be changed in the browser demo — this build has no server to store them. Run PlayerArc locally to use this.');
+  const user = requireAuth();
+  if (body.currentPassword !== passwordFor(user.id)) fail(400, 'Current password is incorrect.');
+  if (!body.newPassword || body.newPassword.length < 8) fail(422, 'Use at least 8 characters.');
+  passwords[user.id] = body.newPassword;
+  const row = byId('users', user.id);
+  if (row) row.must_change_password = 0;
+  session.must_change_password = 0;
+  audit('update', 'users', user.id, 'Password changed');
+  return { ok: true };
 });
 route('POST', /^\/auth\/logout$/, () => { session = null; return { ok: true }; });
 
@@ -692,6 +709,14 @@ route('GET', /^\/players\/(\d+)$/, (m) => {
     attributeHistory: filter('player_attribute_history', (h) => h.player_id === player.id)
       .map((h) => ({ ...h, sport_name: byId('sports', h.sport_id)?.name }))
       .sort((a, b) => String(b.effective_date).localeCompare(String(a.effective_date))),
+    staff: filter('player_staff', (ps) => ps.player_id === player.id).map((ps) => {
+      const c = byId('coaches', ps.coach_id) || {};
+      const sp = byId('sports', ps.sport_id);
+      return {
+        ...ps, coach_name: c.full_name, coach_role: c.role, qualification: c.qualification,
+        photo_url: c.photo_url, sport_name: sp?.name, color: sp?.color,
+      };
+    }).sort((a, b) => (!!a.end_date - !!b.end_date) || String(b.start_date).localeCompare(String(a.start_date))),
     media: filter('media', (x) => x.player_id === player.id),
     documents: can(session, 'documents.read') ? filter('documents', (d) => d.player_id === player.id) : [],
     summary: summaryFor(player.id),
@@ -808,6 +833,45 @@ route('PUT', /^\/players\/(\d+)\/sports\/(\d+)$/, (m, body) => {
   if (body.is_primary) filter('player_sports', (ps) => ps.player_id === row.player_id).forEach((ps) => { ps.is_primary = 0; });
   Object.assign(row, body, { updated_at: now() });
   audit('update', 'player_sports', row.id, 'Sport profile updated');
+  return { ok: true };
+});
+
+route('POST', /^\/players\/(\d+)\/staff$/, (m, body) => {
+  requirePermission('players.write');
+  const player = playerOf(m[1]);
+  if (!player) fail(404, 'That athlete record does not exist.');
+  guardPlayer(player.id);
+  const coach = byId('coaches', body.coach_id);
+  if (!coach) fail(404, 'That staff member does not exist.');
+  const role = body.role || 'coach';
+  if (find('player_staff', (x) => x.player_id === player.id && x.coach_id === coach.id && x.role === role && !x.end_date)) {
+    fail(409, `${coach.full_name} is already assigned to this athlete as ${role.replace('_', ' ')}.`);
+  }
+  const row = {
+    id: nextId('player_staff'), player_id: player.id, coach_id: coach.id,
+    sport_id: body.sport_id ?? coach.sport_id ?? null, role,
+    start_date: body.start_date || today(), end_date: null,
+    notes: body.notes ?? null, created_by: session.id, created_at: now(),
+  };
+  if (!db.player_staff) db.player_staff = [];
+  db.player_staff.push(row);
+  addTimeline({
+    player_id: player.id, event_date: row.start_date, event_type: 'note',
+    title: `${coach.full_name} assigned as ${role.replace('_', ' ')}`,
+    sport_id: row.sport_id, ref_table: 'player_staff', ref_id: row.id,
+  });
+  audit('create', 'player_staff', row.id, `${coach.full_name} assigned to ${player.athlete_id}`);
+  return { ok: true };
+});
+
+route('PUT', /^\/players\/(\d+)\/staff\/(\d+)$/, (m, body) => {
+  requirePermission('players.write');
+  guardPlayer(m[1]);
+  const row = find('player_staff', (x) => x.id === Number(m[2]) && x.player_id === Number(m[1]));
+  if (!row) fail(404, 'That assignment does not exist.');
+  if (body.end_date && body.end_date < row.start_date) fail(422, 'An assignment cannot end before it started.');
+  Object.assign(row, body);
+  audit('update', 'player_staff', row.id, 'Staff assignment updated');
   return { ok: true };
 });
 
@@ -1819,6 +1883,11 @@ route('GET', /^\/admin\/users$/, () => {
         last_login_at: u.last_login_at, is_demo: u.is_demo, created_at: u.created_at,
         role: h.role, role_name: h.role_name,
         sportIds: h.sportIds, teamIds: h.teamIds, playerIds: h.linkedPlayerIds,
+        players: h.linkedPlayerIds.map((id) => {
+          const p = playerOf(id) || {};
+          return { id: p.id, athlete_id: p.athlete_id, first_name: p.first_name, last_name: p.last_name };
+        }),
+        coach: find('coaches', (c) => c.user_id === u.id) || null,
       };
     }).sort((a, b) => a.full_name.localeCompare(b.full_name)),
     roles: ROLES.map((r) => ({ ...r, permissions: permissionsFor(r.key) })),
@@ -1866,9 +1935,55 @@ route('PUT', /^\/admin\/users\/(\d+)$/, (m, body) => {
     db.user_team_scopes = db.user_team_scopes.filter((s) => s.user_id !== user.id);
     body.teamIds.forEach((team_id) => db.user_team_scopes.push({ user_id: user.id, team_id }));
   }
+  if ('coachId' in body) {
+    filter('coaches', (c) => c.user_id === user.id).forEach((c) => { c.user_id = null; });
+    if (body.coachId) {
+      const coach = byId('coaches', body.coachId);
+      if (coach) coach.user_id = user.id;
+    }
+  }
   user.updated_at = now();
   audit('update', 'users', user.id, `User updated: ${user.email}`);
   return { ok: true };
+});
+
+/** Delete a user, with the same two refusals the server applies. */
+route('DELETE', /^\/admin\/users\/(\d+)$/, (m) => {
+  requirePermission('*');
+  const user = byId('users', m[1]);
+  if (!user) fail(404, 'That user does not exist.');
+  if (user.id === session.id) fail(409, 'You cannot delete the account you are signed in with.');
+  const role = byId('roles', user.role_id);
+  if (role?.key === 'super_admin') {
+    const remaining = filter('users', (u) => u.id !== user.id && u.status === 'active'
+      && byId('roles', u.role_id)?.key === 'super_admin').length;
+    if (remaining === 0) fail(409, 'This is the last active super admin. Promote another account first.');
+  }
+  db.users = db.users.filter((u) => u.id !== user.id);
+  db.user_sport_scopes = db.user_sport_scopes.filter((x) => x.user_id !== user.id);
+  db.user_team_scopes = db.user_team_scopes.filter((x) => x.user_id !== user.id);
+  db.user_player_links = db.user_player_links.filter((x) => x.user_id !== user.id);
+  audit('delete', 'users', user.id, `User deleted: ${user.email}`);
+  return { ok: true };
+});
+
+/** Set or generate a password. Returned once, exactly as the server does. */
+route('POST', /^\/admin\/users\/(\d+)\/password$/, (m, body) => {
+  requirePermission('*');
+  const user = byId('users', m[1]);
+  if (!user) fail(404, 'That user does not exist.');
+  if (body.password !== undefined && String(body.password).length < 8) {
+    fail(422, 'Use at least 8 characters.');
+  }
+  const words = ['Falcon', 'Summit', 'Harbour', 'Cypress', 'Kestrel', 'Lantern', 'Meridian', 'Quarry', 'Thistle', 'Vantage'];
+  const pick = () => words[Math.floor(Math.random() * words.length)];
+  const password = body.password || `${pick()}-${pick()}-${Math.floor(1000 + Math.random() * 9000)}`;
+  const mustChange = body.mustChange !== false;
+
+  passwords[user.id] = password;
+  user.must_change_password = mustChange ? 1 : 0;
+  audit('update', 'users', user.id, `Password ${body.password ? 'set' : 'generated'} for ${user.email}`);
+  return { ok: true, password, mustChange, generated: !body.password };
 });
 
 route('GET', /^\/admin\/audit$/, (_, __, query) => {

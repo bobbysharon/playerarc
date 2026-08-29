@@ -139,25 +139,25 @@ async function main() {
   `);
 
   const accounts = [
-    ['admin@karwansc.com', 'Bobby Sharon', 'super_admin', 0],
-    ['director@karwansc.com', 'Nadia Farooqui', 'sports_director', 1],
-    ['cricket.admin@karwansc.com', 'Imran Qureshi', 'sport_admin', 1],
-    ['coach.cricket@karwansc.com', 'Yusuf Baig', 'coach', 1],
-    ['coach.football@karwansc.com', 'Daniel Okafor', 'coach', 1],
-    ['coach.academy@karwansc.com', 'Priya Menon', 'coach', 1],
-    ['stats@karwansc.com', 'Sana Iqbal', 'statistician', 1],
-    ['player@karwansc.com', 'Arun Prasad', 'player', 1],
-    ['parent@karwansc.com', 'Meera Prasad', 'guardian', 1],
+    ['admin@karwansportsclub.com', 'Bobby Sharon', 'super_admin', 0],
+    ['director@karwansportsclub.com', 'Nadia Farooqui', 'sports_director', 1],
+    ['cricket.admin@karwansportsclub.com', 'Imran Qureshi', 'sport_admin', 1],
+    ['coach.cricket@karwansportsclub.com', 'Yusuf Baig', 'coach', 1],
+    ['coach.football@karwansportsclub.com', 'Daniel Okafor', 'coach', 1],
+    ['coach.academy@karwansportsclub.com', 'Priya Menon', 'coach', 1],
+    ['stats@karwansportsclub.com', 'Sana Iqbal', 'statistician', 1],
+    ['player@karwansportsclub.com', 'Arun Prasad', 'player', 1],
+    ['parent@karwansportsclub.com', 'Meera Prasad', 'guardian', 1],
   ];
   tx(() => accounts.forEach(([email, name, role, demo]) => userStmt.run(email, hash, name, roleId(role), '+971 50 000 0000', demo)));
   const userId = (email) => db.prepare('SELECT id FROM users WHERE email = ?').get(email).id;
 
   /* ---- Coaches ----------------------------------------------------- */
   const coachRows = [
-    ['Yusuf Baig', 'cricket', 'head_coach', 'ECB Level 3 · 14 years coaching', 'coach.cricket@karwansc.com'],
+    ['Yusuf Baig', 'cricket', 'head_coach', 'ECB Level 3 · 14 years coaching', 'coach.cricket@karwansportsclub.com'],
     ['Imran Qureshi', 'cricket', 'assistant_coach', 'ECB Level 2 · Spin specialist', null],
-    ['Daniel Okafor', 'football', 'head_coach', 'UEFA B Licence', 'coach.football@karwansc.com'],
-    ['Priya Menon', 'football', 'academy_coach', 'AFC C Licence · Youth development', 'coach.academy@karwansc.com'],
+    ['Daniel Okafor', 'football', 'head_coach', 'UEFA B Licence', 'coach.football@karwansportsclub.com'],
+    ['Priya Menon', 'football', 'academy_coach', 'AFC C Licence · Youth development', 'coach.academy@karwansportsclub.com'],
     ['Marcus Fernandes', 'basketball', 'head_coach', 'FIBA Level 2', null],
     ['Lakshmi Rao', 'badminton', 'head_coach', 'BWF Level 2', null],
     ['Wei Chen', 'table_tennis', 'head_coach', 'ITTF Level 2', null],
@@ -169,7 +169,7 @@ async function main() {
   `);
   tx(() => coachRows.forEach(([name, sport, role, qual, email]) => {
     coachStmt.run(name, sport ? sportId(sport) : null, role, qual, email ? userId(email) : null,
-      daysAgo(int(400, 2000)), '+971 50 000 0000', email || `${name.split(' ')[0].toLowerCase()}@karwansc.com`);
+      daysAgo(int(400, 2000)), '+971 50 000 0000', email || `${name.split(' ')[0].toLowerCase()}@karwansportsclub.com`);
   }));
   const coachId = (name) => db.prepare('SELECT id FROM coaches WHERE full_name = ?').get(name).id;
 
@@ -217,7 +217,7 @@ async function main() {
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?)
   `);
 
-  const adminId = userId('admin@karwansc.com');
+  const adminId = userId('admin@karwansportsclub.com');
   const players = [];
   const usedNames = new Set();
 
@@ -262,19 +262,19 @@ async function main() {
   const arun = players.find((p) => p.first === 'Arun') || players[0];
   tx(() => {
     db.prepare('INSERT OR IGNORE INTO user_player_links (user_id, player_id, relationship) VALUES (?,?,?)')
-      .run(userId('player@karwansc.com'), arun.id, 'self');
+      .run(userId('player@karwansportsclub.com'), arun.id, 'self');
     db.prepare('INSERT OR IGNORE INTO user_player_links (user_id, player_id, relationship) VALUES (?,?,?)')
-      .run(userId('parent@karwansc.com'), arun.id, 'guardian');
+      .run(userId('parent@karwansportsclub.com'), arun.id, 'guardian');
     db.prepare('INSERT OR IGNORE INTO user_sport_scopes (user_id, sport_id) VALUES (?,?)')
-      .run(userId('cricket.admin@karwansc.com'), sportId('cricket'));
+      .run(userId('cricket.admin@karwansportsclub.com'), sportId('cricket'));
     for (const t of ['Karwan Cricket Senior XI', 'Karwan Cricket U18']) {
-      db.prepare('INSERT OR IGNORE INTO user_team_scopes (user_id, team_id) VALUES (?,?)').run(userId('coach.cricket@karwansc.com'), teamId(t));
+      db.prepare('INSERT OR IGNORE INTO user_team_scopes (user_id, team_id) VALUES (?,?)').run(userId('coach.cricket@karwansportsclub.com'), teamId(t));
     }
     for (const t of ['Karwan FC Senior', 'Karwan FC U18', 'Karwan FC U16']) {
-      db.prepare('INSERT OR IGNORE INTO user_team_scopes (user_id, team_id) VALUES (?,?)').run(userId('coach.football@karwansc.com'), teamId(t));
+      db.prepare('INSERT OR IGNORE INTO user_team_scopes (user_id, team_id) VALUES (?,?)').run(userId('coach.football@karwansportsclub.com'), teamId(t));
     }
     for (const t of ['Karwan FC U18', 'Karwan FC U16']) {
-      db.prepare('INSERT OR IGNORE INTO user_team_scopes (user_id, team_id) VALUES (?,?)').run(userId('coach.academy@karwansc.com'), teamId(t));
+      db.prepare('INSERT OR IGNORE INTO user_team_scopes (user_id, team_id) VALUES (?,?)').run(userId('coach.academy@karwansportsclub.com'), teamId(t));
     }
   });
 
@@ -419,7 +419,7 @@ async function main() {
     VALUES (?,?,?,?,?,?,?,?)
   `);
 
-  const statsUserId = userId('stats@karwansc.com');
+  const statsUserId = userId('stats@karwansportsclub.com');
 
   function rosterOf(teamName) {
     return db
@@ -709,7 +709,7 @@ async function main() {
           JSON.stringify(SKILLS[sport]),
           'Good intensity throughout. Standards held in the final block.',
           `Continue work on ${pick(SKILLS[sport]).toLowerCase()}.`,
-          int(4, 9), userId('admin@karwansc.com'),
+          int(4, 9), userId('admin@karwansportsclub.com'),
         );
         sessionCount += 1;
         roster.forEach((r) => {
@@ -771,7 +771,7 @@ async function main() {
                 'Ready for consideration in the age group above.',
                 'Focus block on tactical decision making next quarter.']),
           daysAgo(300 - cycle * 90 - 90),
-          userId('admin@karwansc.com'),
+          userId('admin@karwansportsclub.com'),
         );
         rows.forEach((r) => scoreStmt.run(info.lastInsertRowid, r.criteriaId, r.score, null));
         timeline.addEvent({
@@ -809,7 +809,7 @@ async function main() {
     const info = awardStmt.run(candidates.player_id, title, category,
       category === 'representative' ? 'district' : 'club',
       sportId(sport), tournament ? tourId(tournament) : null, null, date,
-      `Awarded at ${tournament || config.club.name}.`, userId('admin@karwansc.com'));
+      `Awarded at ${tournament || config.club.name}.`, userId('admin@karwansportsclub.com'));
     timeline.addEvent({
       playerId: candidates.player_id, date, type: 'achievement', title,
       sportId: sportId(sport), refTable: 'achievements', refId: info.lastInsertRowid, importance: 3,
@@ -831,21 +831,21 @@ async function main() {
   console.log('\n[seed] demo club ready');
   console.table(counts);
   console.log('\n  Sign in with any of these (password: Karwan@2026)');
-  console.log('  admin@karwansc.com            Super Admin');
-  console.log('  director@karwansc.com         Sports Director');
-  console.log('  cricket.admin@karwansc.com    Sport Administrator (cricket only)');
-  console.log('  coach.cricket@karwansc.com    Coach (cricket teams only)');
-  console.log('  stats@karwansc.com            Statistician');
-  console.log('  player@karwansc.com           Player (own record only)');
-  console.log('  parent@karwansc.com           Parent / Guardian\n');
+  console.log('  admin@karwansportsclub.com            Super Admin');
+  console.log('  director@karwansportsclub.com         Sports Director');
+  console.log('  cricket.admin@karwansportsclub.com    Sport Administrator (cricket only)');
+  console.log('  coach.cricket@karwansportsclub.com    Coach (cricket teams only)');
+  console.log('  stats@karwansportsclub.com            Statistician');
+  console.log('  player@karwansportsclub.com           Player (own record only)');
+  console.log('  parent@karwansportsclub.com           Parent / Guardian\n');
 }
 
 async function seedAdminOnly() {
   const hash = await bcrypt.hash('Karwan@2026', 10);
   const role = db.prepare(`SELECT id FROM roles WHERE key = 'super_admin'`).get();
   db.prepare(`INSERT OR IGNORE INTO users (email, password_hash, full_name, role_id, status) VALUES (?,?,?,?, 'active')`)
-    .run('admin@karwansc.com', hash, 'Bobby Sharon', role.id);
-  console.log('[seed] administrator account created: admin@karwansc.com / Karwan@2026');
+    .run('admin@karwansportsclub.com', hash, 'Bobby Sharon', role.id);
+  console.log('[seed] administrator account created: admin@karwansportsclub.com / Karwan@2026');
 }
 
 main().catch((err) => {

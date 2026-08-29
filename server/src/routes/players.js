@@ -161,6 +161,15 @@ router.get('/:id', requireAuth, (req, res) => {
               LEFT JOIN sports s ON s.id = h.sport_id WHERE h.player_id = ? ORDER BY h.effective_date DESC LIMIT 50`)
     .all(player.id);
 
+  const staff = db
+    .prepare(`SELECT ps.*, c.full_name AS coach_name, c.role AS coach_role, c.qualification, c.photo_url,
+                     s.name AS sport_name, s.color
+              FROM player_staff ps
+              JOIN coaches c ON c.id = ps.coach_id
+              LEFT JOIN sports s ON s.id = ps.sport_id
+              WHERE ps.player_id = ? ORDER BY ps.end_date IS NOT NULL, ps.start_date DESC`)
+    .all(player.id);
+
   const media = db
     .prepare(`SELECT * FROM media WHERE (player_id = ? OR (owner_type = 'player' AND owner_id = ?)) ORDER BY created_at DESC`)
     .all(player.id, player.id)
@@ -177,6 +186,7 @@ router.get('/:id', requireAuth, (req, res) => {
     achievements,
     statusHistory,
     attributeHistory,
+    staff,
     media,
     documents,
     summary: playerSummary(player.id),
@@ -471,6 +481,68 @@ router.put('/:id/sports/:sportId', requirePermission('players.write'), asyncHand
   });
 
   audit(req, { action: 'update', entity: 'player_sports', entityId: before.id, summary: `Sport profile updated for ${player.athlete_id}`, before, after: body });
+  res.json({ ok: true });
+}));
+
+
+/* ------------------------------------------------------------------ */
+/* Staff assigned to this athlete                                       */
+/* ------------------------------------------------------------------ */
+router.post('/:id/staff', requirePermission('players.write'), asyncHandler(async (req, res) => {
+  const player = loadPlayer(req.params.id);
+  guard(req, player.id);
+  const schema = z.object({
+    coach_id: z.coerce.number().int(),
+    sport_id: z.coerce.number().int().optional().nullable(),
+    role: z.enum(['coach', 'assistant_coach', 'personal_trainer', 'fitness_trainer', 'physio', 'mentor', 'specialist']).default('coach'),
+    start_date: z.string().optional(),
+    notes: z.string().optional().nullable(),
+  });
+  const body = schema.parse(req.body);
+
+  const coach = db.prepare('SELECT * FROM coaches WHERE id = ?').get(body.coach_id);
+  if (!coach) throw new ApiError(404, 'That staff member does not exist.');
+  const open = db
+    .prepare('SELECT id FROM player_staff WHERE player_id = ? AND coach_id = ? AND role = ? AND end_date IS NULL')
+    .get(player.id, coach.id, body.role);
+  if (open) throw new ApiError(409, `${coach.full_name} is already assigned to this athlete as ${body.role.replace('_', ' ')}.`);
+
+  const start = body.start_date || new Date().toISOString().slice(0, 10);
+  const info = db
+    .prepare('INSERT INTO player_staff (player_id, coach_id, sport_id, role, start_date, notes, created_by) VALUES (?,?,?,?,?,?,?)')
+    .run(player.id, coach.id, body.sport_id ?? coach.sport_id ?? null, body.role, start, body.notes ?? null, req.user.id);
+
+  timeline.addEvent({
+    playerId: player.id, date: start, type: 'note',
+    title: `${coach.full_name} assigned as ${body.role.replace('_', ' ')}`,
+    sportId: body.sport_id ?? coach.sport_id ?? null,
+    refTable: 'player_staff', refId: info.lastInsertRowid, importance: 2, userId: req.user.id,
+  });
+  audit(req, { action: 'create', entity: 'player_staff', entityId: info.lastInsertRowid, summary: `${coach.full_name} assigned to ${player.athlete_id}` });
+  res.status(201).json({ ok: true });
+}));
+
+/** Close a staff assignment. The row is kept so the history reads correctly. */
+router.put('/:id/staff/:assignmentId', requirePermission('players.write'), asyncHandler(async (req, res) => {
+  const player = loadPlayer(req.params.id);
+  guard(req, player.id);
+  const row = db.prepare('SELECT * FROM player_staff WHERE id = ? AND player_id = ?').get(req.params.assignmentId, player.id);
+  if (!row) throw new ApiError(404, 'That assignment does not exist.');
+
+  const schema = z.object({
+    end_date: z.string().optional().nullable(),
+    role: z.enum(['coach', 'assistant_coach', 'personal_trainer', 'fitness_trainer', 'physio', 'mentor', 'specialist']).optional(),
+    notes: z.string().optional().nullable(),
+  });
+  const body = schema.parse(req.body);
+  if (body.end_date && body.end_date < row.start_date) throw new ApiError(422, 'An assignment cannot end before it started.');
+
+  const sets = Object.keys(body).map((k) => `${k} = ?`);
+  if (sets.length) {
+    db.prepare(`UPDATE player_staff SET ${sets.join(', ')} WHERE id = ?`)
+      .run(...Object.values(body).map((v) => (v === '' ? null : v)), row.id);
+  }
+  audit(req, { action: 'update', entity: 'player_staff', entityId: row.id, summary: `Staff assignment updated for ${player.athlete_id}` });
   res.json({ ok: true });
 }));
 

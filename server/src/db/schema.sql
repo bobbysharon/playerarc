@@ -267,6 +267,28 @@ CREATE TABLE IF NOT EXISTS team_coaches (
   UNIQUE (team_id, coach_id, start_date)
 );
 
+
+-- Staff attached to an individual athlete: a personal trainer, physio or
+-- mentor, separate from the coach who runs their team. Closed with an end
+-- date rather than deleted, like every other assignment.
+CREATE TABLE IF NOT EXISTS player_staff (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  player_id  INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+  coach_id   INTEGER NOT NULL REFERENCES coaches(id) ON DELETE CASCADE,
+  sport_id   INTEGER REFERENCES sports(id) ON DELETE SET NULL,
+  role       TEXT NOT NULL DEFAULT 'coach'
+             CHECK (role IN ('coach','assistant_coach','personal_trainer','fitness_trainer','physio','mentor','specialist')),
+  start_date TEXT NOT NULL DEFAULT (date('now')),
+  end_date   TEXT,
+  notes      TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_player_staff ON player_staff(player_id);
+-- One open assignment per athlete, staff member and role
+CREATE UNIQUE INDEX IF NOT EXISTS uq_player_staff_active
+  ON player_staff(player_id, coach_id, role) WHERE end_date IS NULL;
+
 -- ---------------------------------------------------------------------
 -- 5. COMPETITION: tournaments -> matches -> performances
 -- ---------------------------------------------------------------------

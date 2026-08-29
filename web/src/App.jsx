@@ -21,12 +21,16 @@ import Rankings from './pages/Rankings';
 import Reports from './pages/Reports';
 import Sports from './pages/Sports';
 import Settings from './pages/Settings';
+import UserManager from './pages/UserManager';
+import ChangePassword from './pages/ChangePassword';
 
 function Protected({ children }) {
   const { user, loading } = useAuth();
   const location = useLocation();
   if (loading) return <div className="min-h-screen grid place-items-center"><Spinner label="Loading your workspace" /></div>;
   if (!user) return <Navigate to="/login" state={{ from: location }} replace />;
+  // An administrator issued this password and asked for it to be replaced.
+  if (user.mustChangePassword) return <ChangePassword />;
   return <AppShell>{children}</AppShell>;
 }
 
@@ -52,6 +56,7 @@ export default function App() {
       <Route path="/rankings" element={<Protected><Rankings /></Protected>} />
       <Route path="/reports" element={<Protected><Reports /></Protected>} />
       <Route path="/sports" element={<Protected><Sports /></Protected>} />
+      <Route path="/users" element={<Protected><UserManager /></Protected>} />
       <Route path="/settings" element={<Protected><Settings /></Protected>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

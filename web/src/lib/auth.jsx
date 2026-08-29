@@ -21,6 +21,18 @@ export function AuthProvider({ children }) {
   const value = useMemo(() => ({
     user,
     loading,
+    /** Re-read the signed-in user, e.g. after they change their own password. */
+    async refresh() {
+      const d = await api.get('/auth/me');
+      setUser(d.user);
+      return d.user;
+    },
+    /** Re-read the signed-in user, e.g. after a forced password change. */
+    async refresh() {
+      const d = await api.get('/auth/me');
+      setUser(d.user);
+      return d.user;
+    },
     async signIn(email, password) {
       const data = await api.post('/auth/login', { email, password });
       setToken(data.token);

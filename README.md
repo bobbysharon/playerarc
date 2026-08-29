@@ -28,7 +28,8 @@ complete sporting journey from one place?*
 | **Career timeline** | Registration, sport added, team joined, promotion, debut, milestone, assessment, award — assembled automatically |
 | **Rankings** | Per-sport leaderboards with qualification thresholds; never cross-sport |
 | **Reports** | Player, team, tournament, sport and coach reports, with CSV, Excel and PDF export |
-| **Administration** | Users, roles, data scopes, audit log, demo data management |
+| **User manager** | Accounts, roles, data scopes, staff and athlete links, passwords — super admin only |
+| **Administration** | Audit log, settings, demo data management |
 
 ---
 
@@ -100,16 +101,19 @@ Password for all: `Karwan@2026`
 
 | Email | Role | What they see |
 | --- | --- | --- |
-| `admin@karwansc.com` | Super Admin (Bobby Sharon) | Everything, including users, settings and the audit log |
-| `director@karwansc.com` | Sports Director | All sports, athletes, teams, competitions and performance data |
-| `cricket.admin@karwansc.com` | Sport Administrator | Cricket only |
-| `coach.cricket@karwansc.com` | Coach | Only the cricket teams assigned to them; contact details are hidden |
-| `stats@karwansc.com` | Statistician | Match records and statistics across all sports |
-| `player@karwansc.com` | Player | Their own record only |
-| `parent@karwansc.com` | Parent / Guardian | Their linked child's record only |
+| `admin@karwansportsclub.com` | Super Admin (Bobby Sharon) | Everything, including users, settings and the audit log |
+| `director@karwansportsclub.com` | Sports Director | All sports, athletes, teams, competitions and performance data |
+| `cricket.admin@karwansportsclub.com` | Sport Administrator | Cricket only |
+| `coach.cricket@karwansportsclub.com` | Coach | Only the cricket teams assigned to them; contact details are hidden |
+| `stats@karwansportsclub.com` | Statistician | Match records and statistics across all sports |
+| `player@karwansportsclub.com` | Player | Their own record only |
+| `parent@karwansportsclub.com` | Parent / Guardian | Their linked child's record only |
 
 Signing in as the coach and then the director is the quickest way to see role scoping working — the
 coach sees a fraction of the athlete list, and contact details are stripped from what they receive.
+
+These credentials are documented here only. The sign-in screen does not list accounts or show a
+password, so anyone opening the demo needs to be told what to use.
 
 ### Production build
 
@@ -239,7 +243,8 @@ The build follows the phased approach in the requirements document. All five pha
 | 20 — Search and filtering | Global search, athlete filter panel |
 | 21 — Reports and exports | `routes/analytics.js` — CSV, Excel, PDF |
 | 22 — Rankings | Per-sport leaderboards with qualification thresholds |
-| 23 — Roles | `lib/permissions.js`, eight roles |
+| 23 — Roles | `lib/permissions.js`, eight roles; managed from the User manager |
+| User & athlete administration | `pages/UserManager.jsx`, athlete team and staff assignment on the profile |
 | 24 — Privacy and security | JWT, bcrypt, field redaction, audit log, scoped queries |
 | 25 — Admin dashboard | `pages/Dashboard.jsx` |
 | 27–28 — Relational model, historical records | `db/schema.sql` |
@@ -256,6 +261,18 @@ Consistent with requirement 30, these are modelled but not built out: ball-by-ba
 video analysis, wearable integrations and notifications. None of them require schema restructuring.
 
 ---
+
+## A note on passwords
+
+The user manager lets a super admin create accounts, change roles and scopes, and **issue** a
+password — either typing one or generating a strong one that is shown once with a copy button, with
+an optional "must change at next sign-in" flag that blocks the app until the person picks their own.
+
+What it deliberately cannot do is **display an existing password**. Passwords are stored as bcrypt
+hashes, which are one-way: there is nothing to read back. Keeping them recoverable would mean one
+database leak exposes every account at the club, including athletes' and guardians'. Issuing a new
+password solves the real problem — someone locked out — without that exposure. The smoke test
+asserts that no endpoint returns a hash or a password field.
 
 ## Moving to Postgres
 

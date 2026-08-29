@@ -23,6 +23,7 @@ function profileFor(user) {
     role: user.role,
     roleName: user.role_name,
     avatarUrl: user.avatar_url,
+    mustChangePassword: !!user.must_change_password,
     permissions: permissionsFor(user.role),
     sportIds: user.sportIds || [],
     teamIds: user.teamIds || [],

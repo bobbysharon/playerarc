@@ -7,7 +7,7 @@ import {
 import {
   LayoutDashboard, Users, Shield, Megaphone, Trophy, Swords, Dumbbell, ClipboardCheck,
   Award, BarChart3, FileText, Shapes, Settings as SettingsIcon, Search as SearchIcon,
-  LogOut, Menu, X, ChevronRight,
+  LogOut, Menu, X, ChevronRight, UserCog,
 } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 import { api } from '../lib/api';
@@ -520,6 +520,7 @@ const NAV = [
   ] },
   { group: 'Club', items: [
     { to: '/sports', label: 'Sports', icon: Shapes, permission: 'sports.read' },
+    { to: '/users', label: 'Users', icon: UserCog, permission: '*' },
     { to: '/settings', label: 'Settings', icon: SettingsIcon, permission: null },
   ] },
 ];
@@ -605,7 +606,12 @@ export function AppShell({ children }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const navigate = useNavigate();
 
-  const allowed = (n) => !n.permission || can(n.permission) || user?.role === 'player' || user?.role === 'guardian';
+  // Admin-only items never fall through to the player/guardian allowance below.
+  const allowed = (n) => {
+    if (n.permission === '*') return can('*');
+    if (!n.permission || can(n.permission)) return true;
+    return user?.role === 'player' || user?.role === 'guardian';
+  };
   const groups = NAV
     .map((g) => ({ ...g, items: g.items.filter(allowed) }))
     .filter((g) => g.items.length);

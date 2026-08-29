@@ -21,7 +21,11 @@ export default function PlayerProfile() {
   const [editing, setEditing] = useState(false);
   const [addingSport, setAddingSport] = useState(false);
   const [addingNote, setAddingNote] = useState(false);
+  const [assigningTeam, setAssigningTeam] = useState(false);
+  const [assigningStaff, setAssigningStaff] = useState(false);
   const [sports, setSports] = useState([]);
+  const [teams, setTeams] = useState([]);
+  const [coaches, setCoaches] = useState([]);
 
   const load = useCallback(() => {
     setError(null);
@@ -33,7 +37,11 @@ export default function PlayerProfile() {
   }, [id]);
 
   useEffect(() => { load(); }, [load]);
-  useEffect(() => { api.get('/sports').then((d) => setSports(d.sports)).catch(() => {}); }, []);
+  useEffect(() => {
+    api.get('/sports').then((d) => setSports(d.sports)).catch(() => {});
+    api.get('/teams').then((d) => setTeams(d.teams)).catch(() => {});
+    api.get('/coaches').then((d) => setCoaches(d.coaches)).catch(() => {});
+  }, []);
 
   if (error) return <ErrorNote error={error} />;
   if (!profile) return <Spinner label="Opening athlete record" />;
@@ -334,7 +342,11 @@ export default function PlayerProfile() {
 
         {tab === 'teams' && (
           <div className="space-y-5">
-            <Section title="Team history" subtitle="Historical memberships are closed, never deleted">
+            <Section
+              title="Team history"
+              subtitle="Historical memberships are closed, never deleted"
+              actions={can('teams.write') ? <button type="button" className="btn-gold text-xs" onClick={() => setAssigningTeam(true)}>Assign to team</button> : null}
+            >
               <DataTable
                 columns={[
                   { key: 'team_name', label: 'Team', render: (r) => <Link to={`/teams/${r.team_id}`} className="link">{r.team_name}</Link> },
@@ -347,6 +359,41 @@ export default function PlayerProfile() {
                 ]}
                 rows={profile.teamHistory}
                 empty={{ title: 'No team history', message: 'Add this athlete to a team roster to begin the record.' }}
+              />
+            </Section>
+
+
+            <Section
+              title="Coaches & trainers"
+              subtitle="Staff assigned to this athlete directly, alongside whoever runs their team"
+              actions={can('players.write') ? <button type="button" className="btn-gold text-xs" onClick={() => setAssigningStaff(true)}>Assign staff</button> : null}
+            >
+              <DataTable
+                columns={[
+                  { key: 'coach_name', label: 'Staff member', render: (r) => <Link to={`/coaches/${r.coach_id}`} className="link">{r.coach_name}</Link> },
+                  { key: 'role', label: 'Assigned as', render: (r) => titleCase(r.role) },
+                  { key: 'sport_name', label: 'Sport', render: (r) => r.sport_name || '—' },
+                  { key: 'qualification', label: 'Qualification', render: (r) => r.qualification || '—' },
+                  { key: 'period', label: 'Period', render: (r) => `${formatDate(r.start_date)} → ${r.end_date ? formatDate(r.end_date) : 'present'}` },
+                  { key: 'status', label: '', render: (r) => <Chip tone={r.end_date ? 'inactive' : 'active'}>{r.end_date ? 'Ended' : 'Current'}</Chip> },
+                  ...(can('players.write') ? [{
+                    key: 'actions', label: '', align: 'right',
+                    render: (r) => (r.end_date ? null : (
+                      <button
+                        type="button"
+                        className="btn-quiet text-xs"
+                        onClick={async () => {
+                          await api.put(`/players/${id}/staff/${r.id}`, { end_date: new Date().toISOString().slice(0, 10) });
+                          load();
+                        }}
+                      >
+                        End
+                      </button>
+                    )),
+                  }] : []),
+                ]}
+                rows={profile.staff || []}
+                empty={{ title: 'No staff assigned', message: 'Assign a coach, trainer or physio to follow this athlete personally.' }}
               />
             </Section>
 
@@ -495,6 +542,22 @@ export default function PlayerProfile() {
       <EditPlayer open={editing} onClose={() => setEditing(false)} player={p} onSaved={load} />
       <AddSport open={addingSport} onClose={() => setAddingSport(false)} playerId={id} sports={sports} existing={profile.sports} onSaved={load} />
       <AddTimelineNote open={addingNote} onClose={() => setAddingNote(false)} playerId={id} sports={profile.sports} onSaved={load} />
+      <AssignTeam
+        open={assigningTeam}
+        onClose={() => setAssigningTeam(false)}
+        playerId={id}
+        teams={teams}
+        current={currentTeams}
+        onSaved={load}
+      />
+      <AssignStaff
+        open={assigningStaff}
+        onClose={() => setAssigningStaff(false)}
+        playerId={id}
+        coaches={coaches}
+        sports={profile.sports}
+        onSaved={load}
+      />
     </>
   );
 }
@@ -696,6 +759,150 @@ function AddTimelineNote({ open, onClose, playerId, sports, onSaved }) {
         <div className="flex justify-end gap-2 pt-1">
           <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
           <button type="submit" className="btn-gold">Add entry</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function AssignTeam({ open, onClose, playerId, teams, current, onSaved }) {
+  const [form, setForm] = useState({ team_id: '', role: 'player', jersey_number: '', start_date: new Date().toISOString().slice(0, 10) });
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setForm({ team_id: '', role: 'player', jersey_number: '', start_date: new Date().toISOString().slice(0, 10) });
+      setError(null);
+    }
+  }, [open]);
+
+  const alreadyOn = new Set((current || []).map((t) => t.team_id));
+  const available = teams.filter((t) => !alreadyOn.has(t.id));
+
+  async function submit(e) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      await api.post(`/teams/${form.team_id}/members`, {
+        player_id: Number(playerId),
+        role: form.role,
+        jersey_number: form.jersey_number === '' ? null : Number(form.jersey_number),
+        start_date: form.start_date,
+      });
+      onSaved();
+      onClose();
+    } catch (err) { setError(err); } finally { setBusy(false); }
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title="Assign to a team">
+      <form onSubmit={submit} className="space-y-3">
+        <p className="text-sm text-ink-400">
+          Joining a team also registers the athlete for that sport if they are not already. Their athlete ID and
+          existing record stay the same.
+        </p>
+        <Field label="Team">
+          <select className="input" required value={form.team_id} onChange={(e) => setForm({ ...form, team_id: e.target.value })}>
+            <option value="">Choose a team</option>
+            {available.map((t) => (
+              <option key={t.id} value={t.id}>{t.name} — {t.sport_name}{t.age_group ? ` · ${t.age_group}` : ''}</option>
+            ))}
+          </select>
+        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Squad role">
+            <select className="input" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
+              {['player', 'captain', 'vice_captain', 'wicket_keeper', 'goalkeeper'].map((r) => (
+                <option key={r} value={r}>{titleCase(r)}</option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Jersey number" hint="Must be free in that squad">
+            <input className="input" type="number" value={form.jersey_number} onChange={(e) => setForm({ ...form, jersey_number: e.target.value })} />
+          </Field>
+          <Field label="Start date" className="col-span-2">
+            <input className="input" type="date" value={form.start_date} onChange={(e) => setForm({ ...form, start_date: e.target.value })} />
+          </Field>
+        </div>
+        <ErrorNote error={error} />
+        <div className="flex justify-end gap-2 pt-1">
+          <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
+          <button type="submit" className="btn-gold" disabled={busy || !form.team_id}>{busy ? 'Assigning…' : 'Assign to team'}</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function AssignStaff({ open, onClose, playerId, coaches, sports, onSaved }) {
+  const [form, setForm] = useState({ coach_id: '', role: 'coach', sport_id: '', start_date: new Date().toISOString().slice(0, 10), notes: '' });
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setForm({ coach_id: '', role: 'coach', sport_id: '', start_date: new Date().toISOString().slice(0, 10), notes: '' });
+      setError(null);
+    }
+  }, [open]);
+
+  async function submit(e) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      await api.post(`/players/${playerId}/staff`, {
+        coach_id: Number(form.coach_id),
+        role: form.role,
+        sport_id: form.sport_id ? Number(form.sport_id) : null,
+        start_date: form.start_date,
+        notes: form.notes || null,
+      });
+      onSaved();
+      onClose();
+    } catch (err) { setError(err); } finally { setBusy(false); }
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title="Assign a coach or trainer">
+      <form onSubmit={submit} className="space-y-3">
+        <p className="text-sm text-ink-400">
+          This is a personal assignment — a trainer, physio or mentor following this athlete specifically. It sits
+          alongside whoever coaches their team.
+        </p>
+        <Field label="Staff member">
+          <select className="input" required value={form.coach_id} onChange={(e) => setForm({ ...form, coach_id: e.target.value })}>
+            <option value="">Choose</option>
+            {coaches.map((c) => (
+              <option key={c.id} value={c.id}>{c.full_name} — {titleCase(c.role)}{c.sport_name ? ` · ${c.sport_name}` : ''}</option>
+            ))}
+          </select>
+        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Assigned as">
+            <select className="input" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
+              {['coach', 'assistant_coach', 'personal_trainer', 'fitness_trainer', 'physio', 'mentor', 'specialist'].map((r) => (
+                <option key={r} value={r}>{titleCase(r)}</option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Sport" hint="Leave empty if it applies across sports">
+            <select className="input" value={form.sport_id} onChange={(e) => setForm({ ...form, sport_id: e.target.value })}>
+              <option value="">All sports</option>
+              {sports.map((s) => <option key={s.sport_id} value={s.sport_id}>{s.sport_name}</option>)}
+            </select>
+          </Field>
+          <Field label="Start date" className="col-span-2">
+            <input className="input" type="date" value={form.start_date} onChange={(e) => setForm({ ...form, start_date: e.target.value })} />
+          </Field>
+        </div>
+        <Field label="Notes"><textarea className="input" rows={2} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></Field>
+        <ErrorNote error={error} />
+        <div className="flex justify-end gap-2 pt-1">
+          <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
+          <button type="submit" className="btn-gold" disabled={busy || !form.coach_id}>{busy ? 'Assigning…' : 'Assign staff'}</button>
         </div>
       </form>
     </Modal>

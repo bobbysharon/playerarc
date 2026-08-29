@@ -29,7 +29,7 @@ const check = async (name, fn) => {
   }
 };
 
-const login = await req('/auth/login', { method: 'POST', body: { email: 'admin@karwansc.com', password: 'Karwan@2026' } });
+const login = await req('/auth/login', { method: 'POST', body: { email: 'admin@karwansportsclub.com', password: 'Karwan@2026' } });
 token = login.d.token;
 
 await check('sign in returns a token', () => !!token);
@@ -101,7 +101,7 @@ await check('PDF career report', async () => {
 
 /* ---- Permission and scope enforcement ---- */
 const adminToken = token;
-const coachLogin = await req('/auth/login', { method: 'POST', body: { email: 'coach.cricket@karwansc.com', password: 'Karwan@2026' } });
+const coachLogin = await req('/auth/login', { method: 'POST', body: { email: 'coach.cricket@karwansportsclub.com', password: 'Karwan@2026' } });
 token = coachLogin.d.token;
 const coachPlayers = await req('/players?pageSize=100');
 const allPlayers = (() => { token = adminToken; return req('/players?pageSize=100'); })();
@@ -117,7 +117,7 @@ await check('coach cannot register athletes', async () => {
 });
 await check('contact details redacted for coach', () => coachPlayers.d.players[0]._redacted === true);
 
-const playerLogin = await req('/auth/login', { method: 'POST', body: { email: 'player@karwansc.com', password: 'Karwan@2026' } });
+const playerLogin = await req('/auth/login', { method: 'POST', body: { email: 'player@karwansportsclub.com', password: 'Karwan@2026' } });
 token = playerLogin.d.token;
 await check('player sees only their own record', async () => (await req('/players?pageSize=50')).d.total === 1);
 
@@ -142,6 +142,76 @@ await check('impossible statistics rejected', async () => {
 await check('unauthenticated request refused', async () => {
   const r = await fetch(`${BASE}/players`);
   return r.status === 401;
+});
+
+/* ---- User management ---- */
+let newUserId;
+await check('create a user', async () => {
+  const r = await req('/admin/users', {
+    method: 'POST',
+    body: { full_name: 'Test Coach', email: 'test.coach@karwansportsclub.com', password: 'Temporary123', role: 'coach', teamIds: [teamId] },
+  });
+  newUserId = r.d.id;
+  return r.status === 201 && !!newUserId;
+});
+await check('new user can sign in', async () => {
+  const r = await req('/auth/login', { method: 'POST', body: { email: 'test.coach@karwansportsclub.com', password: 'Temporary123' } });
+  return r.status === 200 && r.d.user.role === 'coach';
+});
+await check('generate a password, returned once', async () => {
+  const r = await req(`/admin/users/${newUserId}/password`, { method: 'POST', body: { mustChange: true } });
+  return r.status === 200 && r.d.generated === true && r.d.password.length > 8 && r.d.mustChange === true;
+});
+await check('generated password works and forces a change', async () => {
+  const gen = await req(`/admin/users/${newUserId}/password`, { method: 'POST', body: { mustChange: true } });
+  const login = await req('/auth/login', { method: 'POST', body: { email: 'test.coach@karwansportsclub.com', password: gen.d.password } });
+  return login.status === 200 && login.d.user.mustChangePassword === true;
+});
+await check('set a chosen password', async () => {
+  const r = await req(`/admin/users/${newUserId}/password`, { method: 'POST', body: { password: 'ChosenPass123', mustChange: false } });
+  const login = await req('/auth/login', { method: 'POST', body: { email: 'test.coach@karwansportsclub.com', password: 'ChosenPass123' } });
+  return r.d.generated === false && login.status === 200 && login.d.user.mustChangePassword === false;
+});
+await check('short passwords refused', async () => {
+  const r = await req(`/admin/users/${newUserId}/password`, { method: 'POST', body: { password: 'short' } });
+  return r.status === 422;
+});
+await check('no endpoint ever returns a stored password', async () => {
+  const list = await req('/admin/users');
+  return !JSON.stringify(list.d).includes('password_hash') && !JSON.stringify(list.d).match(/"password"/);
+});
+await check('cannot delete your own account', async () => {
+  const me = (await req('/admin/users')).d.users.find((u) => u.email === 'admin@karwansportsclub.com');
+  const r = await req(`/admin/users/${me.id}`, { method: 'DELETE' });
+  return r.status === 409;
+});
+await check('delete a user', async () => (await req(`/admin/users/${newUserId}`, { method: 'DELETE' })).status === 200);
+await check('non-admin cannot manage users', async () => {
+  token = coachLogin.d.token;
+  const r = await req('/admin/users');
+  token = adminToken;
+  return r.status === 403;
+});
+
+/* ---- Athlete assignments ---- */
+await check('assign a coach to an athlete', async () => {
+  const r = await req(`/players/${pid}/staff`, { method: 'POST', body: { coach_id: coachId, role: 'personal_trainer' } });
+  return r.status === 201;
+});
+await check('duplicate staff assignment refused', async () => {
+  const r = await req(`/players/${pid}/staff`, { method: 'POST', body: { coach_id: coachId, role: 'personal_trainer' } });
+  return r.status === 409;
+});
+await check('staff appears on the athlete profile', async () => {
+  const r = await req(`/players/${pid}`);
+  return Array.isArray(r.d.staff) && r.d.staff.some((x) => x.role === 'personal_trainer');
+});
+await check('end a staff assignment without deleting it', async () => {
+  const profile = await req(`/players/${pid}`);
+  const assignment = profile.d.staff.find((x) => !x.end_date);
+  const r = await req(`/players/${pid}/staff/${assignment.id}`, { method: 'PUT', body: { end_date: new Date().toISOString().slice(0, 10) } });
+  const after = await req(`/players/${pid}`);
+  return r.status === 200 && after.d.staff.some((x) => x.id === assignment.id && x.end_date);
 });
 
 /* ---- Single page app is served ---- */

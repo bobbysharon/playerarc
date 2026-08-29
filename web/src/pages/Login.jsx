@@ -4,22 +4,13 @@ import { useAuth } from '../lib/auth';
 import { DEMO_MODE } from '../lib/api';
 import { ErrorNote, Field } from '../components/ui';
 
-const DEMO_ACCOUNTS = [
-  ['admin@karwansc.com', 'Super Admin — everything'],
-  ['director@karwansc.com', 'Sports Director — all sports'],
-  ['cricket.admin@karwansc.com', 'Sport Administrator — cricket only'],
-  ['coach.cricket@karwansc.com', 'Coach — assigned teams only'],
-  ['stats@karwansc.com', 'Statistician — match records'],
-  ['player@karwansc.com', 'Player — own record'],
-  ['parent@karwansc.com', 'Parent — linked child'],
-];
 
 export default function Login() {
   const { user, signIn } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const [email, setEmail] = useState('admin@karwansc.com');
-  const [password, setPassword] = useState('Karwan@2026');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
 
@@ -82,7 +73,7 @@ export default function Login() {
         <div className="w-full max-w-sm">
           <h2 className="font-display text-3xl">Sign in</h2>
           <p className="text-sm text-ink-400 mt-1">
-            {DEMO_MODE ? 'Pick any account below to explore the platform.' : 'Use your Karwan Sports Club account.'}
+            Use your Karwan Sports Club account.
           </p>
 
           {DEMO_MODE && (
@@ -90,9 +81,8 @@ export default function Login() {
               <p className="font-semibold mb-1">This is a browser demonstration.</p>
               <p>
                 Everything runs in this page — the full interface, the seeded club, real career
-                statistics and role permissions. Changes you make are kept until you reload, and
-                sign-in is not secured. Run PlayerArc locally for the real server, database and
-                Excel and PDF reports.
+                statistics and role permissions. Changes you make are kept until you reload. Run
+                PlayerArc locally for the real server, database and Excel and PDF reports.
               </p>
             </div>
           )}
@@ -110,24 +100,6 @@ export default function Login() {
             </button>
           </form>
 
-          <div className="mt-8 card p-4">
-            <p className="label mb-2">Demonstration accounts</p>
-            <p className="text-xs text-ink-400 mb-3">Password for all: <span className="font-mono">Karwan@2026</span>. Each role sees a different slice of the club.</p>
-            <ul className="space-y-1">
-              {DEMO_ACCOUNTS.map(([addr, note]) => (
-                <li key={addr}>
-                  <button
-                    type="button"
-                    onClick={() => { setEmail(addr); setPassword('Karwan@2026'); }}
-                    className="w-full text-left px-2 py-1.5 rounded hover:bg-white/5 group transition-colors"
-                  >
-                    <span className="font-mono text-[11px] text-ink block group-hover:text-gold transition-colors">{addr}</span>
-                    <span className="text-[11px] text-ink-400">{note}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
         </div>
       </div>
     </div>
