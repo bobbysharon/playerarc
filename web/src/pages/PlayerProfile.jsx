@@ -1,0 +1,702 @@
+import { useCallback, useEffect, useState } from 'react';
+import { Link, useParams } from 'react-router-dom';
+import { api } from '../lib/api';
+import { useAuth } from '../lib/auth';
+import {
+  Spinner, ErrorNote, Avatar, StatusChip, Section, Tabs, StatTile, Modal, Field,
+  CareerSpine, StatGrid, RatingDial, TrendChart, DataTable, EmptyState, Chip,
+} from '../components/ui';
+import { ageFrom, formatDate, formatDateTime, playerName, titleCase } from '../lib/format';
+
+export default function PlayerProfile() {
+  const { id } = useParams();
+  const { can, user } = useAuth();
+  const [profile, setProfile] = useState(null);
+  const [careers, setCareers] = useState(null);
+  const [timeline, setTimeline] = useState(null);
+  const [activity, setActivity] = useState(null);
+  const [development, setDevelopment] = useState(null);
+  const [error, setError] = useState(null);
+  const [tab, setTab] = useState('overview');
+  const [editing, setEditing] = useState(false);
+  const [addingSport, setAddingSport] = useState(false);
+  const [addingNote, setAddingNote] = useState(false);
+  const [sports, setSports] = useState([]);
+
+  const load = useCallback(() => {
+    setError(null);
+    api.get(`/players/${id}`).then(setProfile).catch(setError);
+    api.get(`/players/${id}/stats`).then((d) => setCareers(d.careers)).catch(() => setCareers([]));
+    api.get(`/players/${id}/timeline`).then((d) => setTimeline(d.events)).catch(() => setTimeline([]));
+    api.get(`/players/${id}/activity?limit=6`).then(setActivity).catch(() => setActivity(null));
+    api.get(`/assessments/player/${id}/development`).then(setDevelopment).catch(() => setDevelopment(null));
+  }, [id]);
+
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => { api.get('/sports').then((d) => setSports(d.sports)).catch(() => {}); }, []);
+
+  if (error) return <ErrorNote error={error} />;
+  if (!profile) return <Spinner label="Opening athlete record" />;
+
+  const p = profile.player;
+  const s = profile.summary;
+  const primarySport = profile.sports.find((x) => x.is_primary) || profile.sports[0];
+  const currentTeams = profile.teamHistory.filter((t) => !t.end_date);
+
+  const tabs = [
+    { key: 'overview', label: 'Overview' },
+    { key: 'statistics', label: 'Statistics', count: careers?.length },
+    { key: 'development', label: 'Development' },
+    { key: 'timeline', label: 'Career timeline', count: timeline?.length },
+    { key: 'teams', label: 'Teams', count: profile.teamHistory.length },
+    { key: 'achievements', label: 'Achievements', count: profile.achievements.length },
+    { key: 'profile', label: 'Profile & records' },
+  ];
+
+  return (
+    <>
+      {/* Jersey plate header — the identity block that anchors the record */}
+      <div className="card overflow-hidden mb-5">
+        <div className="bg-ink text-white px-5 py-5 flex flex-wrap items-center gap-5">
+          <Avatar player={p} size={80} />
+          <div className="min-w-0 flex-1">
+            <p className="font-mono text-xs text-gold tracking-wider">{p.athlete_id}</p>
+            <h1 className="font-display text-4xl sm:text-5xl leading-none mt-1">{playerName(p)}</h1>
+            <div className="flex flex-wrap items-center gap-2 mt-3">
+              <StatusChip status={p.status} />
+              {profile.sports.map((sp) => (
+                <span key={sp.id} className="chip" style={{ background: `${sp.color}22`, color: sp.color }}>
+                  {sp.sport_name}{sp.is_primary ? ' · primary' : ''}
+                </span>
+              ))}
+              {primarySport?.position && <span className="chip bg-ink-700 text-ink-200">{titleCase(primarySport.position)}</span>}
+              {currentTeams.map((t) => (
+                <Link key={t.id} to={`/teams/${t.team_id}`} className="chip bg-ink-700 text-white hover:bg-ink-600">{t.team_name}</Link>
+              ))}
+            </div>
+          </div>
+          <div className="flex gap-2">
+            {can('reports.export') && (
+              <button type="button" className="btn-ghost" onClick={() => api.download(`/export/player/${id}.pdf`, `${p.athlete_id}-career-report.pdf`)}>
+                Career report
+              </button>
+            )}
+            {can('players.write') && <button type="button" className="btn-gold" onClick={() => setEditing(true)}>Edit record</button>}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-7 divide-x divide-line border-t border-line">
+          {[
+            ['Matches', s.matches],
+            ['Wins', `${s.wins}`, `${s.winRate}% win rate`],
+            ['Tournaments', s.tournaments],
+            ['Awards', s.awards],
+            ['Sports', s.sports],
+            ['Attendance', `${s.attendanceRate}%`, `${s.trainingAttended}/${s.trainingSessions} sessions`],
+            ['Rating', s.rating ?? '—', s.rating ? 'out of 100' : 'no data yet'],
+          ].map(([label, value, hint]) => (
+            <div key={label} className="px-3 py-3">
+              <p className="label">{label}</p>
+              <p className="font-display text-2xl leading-none mt-1">{value}</p>
+              {hint && <p className="text-[10px] text-ink-400 mt-1">{hint}</p>}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <Tabs tabs={tabs} active={tab} onChange={setTab} />
+
+      <div className="mt-5">
+        {tab === 'overview' && (
+          <div className="grid lg:grid-cols-3 gap-5">
+            <div className="lg:col-span-2 space-y-5">
+              {careers?.filter((c) => c.matchesPlayed > 0).map((c) => (
+                <Section key={c.sport.id} title={`${c.sport.name} — career`} subtitle={`${c.matchesPlayed} recorded appearances`}
+                  actions={<button type="button" className="btn-quiet text-xs" onClick={() => setTab('statistics')}>Full statistics</button>}>
+                  <div className="p-4">
+                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-px bg-line rounded-lg overflow-hidden border border-line mb-4">
+                      {c.headline.map((h) => (
+                        <div key={h.key} className="bg-white px-3 py-2.5">
+                          <p className="text-[10px] uppercase tracking-wide text-ink-400 truncate">{h.label}</p>
+                          <p className="stat-value text-xl mt-0.5">{h.display}</p>
+                        </div>
+                      ))}
+                    </div>
+                    {c.rating && <RatingDial rating={c.rating} />}
+                  </div>
+                </Section>
+              ))}
+
+              {(!careers || careers.every((c) => !c.matchesPlayed)) && (
+                <Section title="Career statistics">
+                  <EmptyState title="No appearances recorded yet" message="Statistics build automatically as match performances are entered." />
+                </Section>
+              )}
+
+              <Section title="Recent activity">
+                <div className="divide-y divide-line">
+                  {activity?.matches?.slice(0, 4).map((m) => (
+                    <Link key={m.id} to={`/matches/${m.id}`} className="flex items-center gap-3 px-4 py-3 hover:bg-canvas">
+                      <span className="h-8 w-1 rounded-full shrink-0" style={{ background: m.color }} />
+                      <span className="min-w-0 flex-1">
+                        <span className="text-sm font-medium block truncate">
+                          {m.sport_name} vs {m.opponent_name || m.away_team_name || 'opposition'}
+                        </span>
+                        <span className="text-xs text-ink-400">{m.tournament_name || 'Friendly'} · {m.venue || 'Venue not recorded'}</span>
+                      </span>
+                      {m.is_motm ? <Chip tone="upcoming">Player of the match</Chip> : m.result && <Chip tone={m.result}>{titleCase(m.result)}</Chip>}
+                      <span className="font-mono text-[11px] text-ink-400 shrink-0 hidden sm:block">{formatDate(m.scheduled_at)}</span>
+                    </Link>
+                  ))}
+                  {activity?.training?.slice(0, 3).map((t) => (
+                    <Link key={`t${t.id}`} to={`/training/${t.id}`} className="flex items-center gap-3 px-4 py-3 hover:bg-canvas">
+                      <span className="min-w-0 flex-1">
+                        <span className="text-sm block truncate">{titleCase(t.training_type)} training · {t.team_name || t.sport_name}</span>
+                        {t.coach_notes && <span className="text-xs text-ink-400 truncate block">{t.coach_notes}</span>}
+                      </span>
+                      <Chip tone={t.status}>{titleCase(t.status)}</Chip>
+                      <span className="font-mono text-[11px] text-ink-400 shrink-0 hidden sm:block">{formatDate(t.session_date)}</span>
+                    </Link>
+                  ))}
+                  {!activity?.matches?.length && !activity?.training?.length && (
+                    <EmptyState title="No activity recorded" message="Matches, training and assessments appear here as they are entered." />
+                  )}
+                </div>
+              </Section>
+            </div>
+
+            <div className="space-y-5">
+              <Section title="Career timeline" subtitle="Newest first"
+                actions={can('players.write') ? <button type="button" className="btn-quiet text-xs" onClick={() => setAddingNote(true)}>Add entry</button> : null}>
+                <div className="p-4 max-h-[520px] overflow-y-auto scroll-thin">
+                  <CareerSpine events={(timeline || []).slice(0, 25)} compact />
+                </div>
+              </Section>
+
+              <Section title="Achievements">
+                {profile.achievements.length === 0
+                  ? <EmptyState title="No awards yet" message="Awards recorded against matches and tournaments appear here." />
+                  : (
+                    <ul className="divide-y divide-line">
+                      {profile.achievements.slice(0, 6).map((a) => (
+                        <li key={a.id} className="px-4 py-3 flex items-start gap-3">
+                          <span className="text-gold text-lg leading-none">🏆</span>
+                          <span className="min-w-0 flex-1">
+                            <span className="text-sm font-medium block">{a.title}</span>
+                            <span className="text-xs text-ink-400">{[a.sport_name, a.tournament_name].filter(Boolean).join(' · ')}</span>
+                          </span>
+                          <span className="font-mono text-[11px] text-ink-400">{formatDate(a.awarded_date)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+              </Section>
+            </div>
+          </div>
+        )}
+
+        {tab === 'statistics' && (
+          <div className="space-y-5">
+            {careers?.length === 0 && <Section><EmptyState title="Not registered for any sport" message="Add a sport to begin recording performances." /></Section>}
+            {careers?.map((c) => (
+              <Section key={c.sport.id} title={`${c.sport.name}`} subtitle={`${c.matchesPlayed} appearances recorded`}>
+                <div className="p-4 space-y-5">
+                  {c.matchesPlayed === 0 ? (
+                    <EmptyState title="No performances recorded" message={`Statistics appear here once ${c.sport.name.toLowerCase()} match data is entered.`} />
+                  ) : (
+                    <>
+                      <StatGrid groups={c.career.groups} />
+                      {c.rating && (
+                        <div className="grid md:grid-cols-2 gap-5 pt-2 border-t border-line">
+                          <div>
+                            <p className="label mb-2">Performance rating</p>
+                            <RatingDial rating={c.rating} />
+                            <p className="text-xs text-ink-400 mt-3">
+                              Each sport uses its own weighted model. Weights are configurable in Sports settings.
+                            </p>
+                          </div>
+                          <div>
+                            <p className="label mb-2">Match log</p>
+                            <div className="max-h-64 overflow-y-auto scroll-thin border border-line rounded-lg">
+                              <DataTable
+                                dense
+                                columns={[
+                                  { key: 'date', label: 'Date', render: (r) => formatDate(r.date) },
+                                  { key: 'opponent', label: 'Opponent', render: (r) => r.opponent || '—' },
+                                  { key: 'summary', label: 'Key numbers', render: (r) => summariseMatch(c.sport.code, r.computed) },
+                                  { key: 'result', label: '', render: (r) => r.result ? <Chip tone={r.result}>{titleCase(r.result)}</Chip> : null },
+                                ]}
+                                rows={c.performances.slice().reverse()}
+                                empty={{ title: 'No matches', message: '' }}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              </Section>
+            ))}
+          </div>
+        )}
+
+        {tab === 'development' && (
+          <div className="grid lg:grid-cols-3 gap-5">
+            <Section title="Overall assessment trend" subtitle="Every review is kept — nothing is overwritten" className="lg:col-span-2">
+              <div className="p-4">
+                {development?.overallTrend?.length ? (
+                  <TrendChart
+                    data={development.overallTrend.map((d) => ({ date: d.date.slice(0, 7), score: d.value }))}
+                    series={[{ key: 'score', label: 'Overall score', color: '#C8952F' }]}
+                    domain={[0, 10]}
+                    height={240}
+                  />
+                ) : <EmptyState title="No assessments recorded" message="Coaches can record a structured assessment from the Assessments page." />}
+              </div>
+            </Section>
+
+            <Section title="Current profile" subtitle="Latest score per category">
+              <div className="p-4 space-y-3">
+                {development?.byCategory?.length ? development.byCategory.map((c) => (
+                  <div key={c.category}>
+                    <div className="flex justify-between text-sm mb-1">
+                      <span>{titleCase(c.category)}</span>
+                      <span className="stat-value">{c.average ?? '—'}<span className="text-ink-200 text-xs">/10</span></span>
+                    </div>
+                    <div className="h-2 bg-canvas rounded-full overflow-hidden">
+                      <div className="h-full bg-pitch rounded-full" style={{ width: `${((c.average || 0) / 10) * 100}%` }} />
+                    </div>
+                  </div>
+                )) : <p className="text-sm text-ink-400">No assessment data yet.</p>}
+              </div>
+            </Section>
+
+            {development?.criteria?.length > 0 && (
+              <Section title="Criterion progression" subtitle="First recorded score against the most recent" className="lg:col-span-3">
+                <DataTable
+                  columns={[
+                    { key: 'name', label: 'Criterion' },
+                    { key: 'category', label: 'Category', render: (r) => titleCase(r.category) },
+                    { key: 'first', label: 'First', align: 'right', mono: true, render: (r) => r.first ?? '—' },
+                    { key: 'latest', label: 'Latest', align: 'right', mono: true, render: (r) => r.latest ?? '—' },
+                    {
+                      key: 'change', label: 'Change', align: 'right',
+                      render: (r) => r.change == null ? '—' : (
+                        <span className={`stat-value ${r.change > 0 ? 'text-pitch' : r.change < 0 ? 'text-alert' : 'text-ink-400'}`}>
+                          {r.change > 0 ? '+' : ''}{r.change}
+                        </span>
+                      ),
+                    },
+                    {
+                      key: 'spark', label: 'Progression',
+                      render: (r) => (
+                        <span className="flex items-end gap-0.5 h-6">
+                          {r.points.map((pt, i) => (
+                            <span key={i} className="w-1.5 bg-ink rounded-sm" style={{ height: `${Math.max(8, (pt.value / r.scaleMax) * 100)}%` }} title={`${pt.date}: ${pt.value}`} />
+                          ))}
+                        </span>
+                      ),
+                    },
+                  ]}
+                  rows={development.criteria}
+                  empty={{ title: 'No criteria scored', message: '' }}
+                />
+              </Section>
+            )}
+
+            <Section title="Assessment history" className="lg:col-span-3">
+              <DataTable
+                columns={[
+                  { key: 'assessment_date', label: 'Date', render: (r) => formatDate(r.assessment_date) },
+                  { key: 'cycle', label: 'Review', render: (r) => r.cycle || '—' },
+                  { key: 'sport_name', label: 'Sport' },
+                  { key: 'coach_name', label: 'Assessed by', render: (r) => r.coach_name || '—' },
+                  { key: 'overall_score', label: 'Score', align: 'right', mono: true, render: (r) => r.overall_score ?? '—' },
+                  { key: 'summary', label: 'Summary', render: (r) => r.summary || '—' },
+                ]}
+                rows={development?.assessments?.slice().reverse() || []}
+                empty={{ title: 'No assessments yet', message: 'Structured reviews will build a development history here.' }}
+              />
+            </Section>
+          </div>
+        )}
+
+        {tab === 'timeline' && (
+          <Section title="Career timeline" subtitle="Registrations, team moves, matches, milestones, assessments and awards"
+            actions={can('players.write') ? <button type="button" className="btn-gold text-xs" onClick={() => setAddingNote(true)}>Add entry</button> : null}>
+            <div className="p-5 max-h-[70vh] overflow-y-auto scroll-thin">
+              <CareerSpine events={timeline || []} />
+            </div>
+          </Section>
+        )}
+
+        {tab === 'teams' && (
+          <div className="space-y-5">
+            <Section title="Team history" subtitle="Historical memberships are closed, never deleted">
+              <DataTable
+                columns={[
+                  { key: 'team_name', label: 'Team', render: (r) => <Link to={`/teams/${r.team_id}`} className="link">{r.team_name}</Link> },
+                  { key: 'sport_name', label: 'Sport' },
+                  { key: 'age_group', label: 'Age group', render: (r) => r.age_group || '—' },
+                  { key: 'role', label: 'Role', render: (r) => titleCase(r.role) },
+                  { key: 'jersey_number', label: 'Jersey', align: 'right', mono: true, render: (r) => r.jersey_number ?? '—' },
+                  { key: 'period', label: 'Period', render: (r) => `${formatDate(r.start_date)} → ${r.end_date ? formatDate(r.end_date) : 'present'}` },
+                  { key: 'status', label: 'Status', render: (r) => <Chip tone={r.end_date ? 'inactive' : 'active'}>{r.end_date ? titleCase(r.status) : 'Current'}</Chip> },
+                ]}
+                rows={profile.teamHistory}
+                empty={{ title: 'No team history', message: 'Add this athlete to a team roster to begin the record.' }}
+              />
+            </Section>
+
+            <Section title="Sports registered"
+              actions={can('players.write') ? <button type="button" className="btn-gold text-xs" onClick={() => setAddingSport(true)}>Add sport</button> : null}>
+              <DataTable
+                columns={[
+                  { key: 'sport_name', label: 'Sport' },
+                  { key: 'is_primary', label: 'Primary', render: (r) => r.is_primary ? <Chip tone="active">Primary</Chip> : '—' },
+                  { key: 'position', label: 'Position', render: (r) => titleCase(r.position) || '—' },
+                  { key: 'playing_level', label: 'Level', render: (r) => titleCase(r.playing_level) || '—' },
+                  { key: 'jersey_number', label: 'Jersey', align: 'right', mono: true, render: (r) => r.jersey_number ?? '—' },
+                  { key: 'joined_date', label: 'Since', render: (r) => formatDate(r.joined_date) },
+                ]}
+                rows={profile.sports}
+                empty={{ title: 'Not registered for a sport', message: 'Add a sport so performances can be recorded.' }}
+              />
+            </Section>
+
+            {profile.attributeHistory.length > 0 && (
+              <Section title="Change history" subtitle="Position, level and jersey changes are kept as a record">
+                <DataTable
+                  columns={[
+                    { key: 'effective_date', label: 'Date', render: (r) => formatDate(r.effective_date) },
+                    { key: 'sport_name', label: 'Sport', render: (r) => r.sport_name || '—' },
+                    { key: 'attribute', label: 'Field', render: (r) => titleCase(r.attribute) },
+                    { key: 'old_value', label: 'From', render: (r) => titleCase(r.old_value) || '—' },
+                    { key: 'new_value', label: 'To', render: (r) => titleCase(r.new_value) || '—' },
+                  ]}
+                  rows={profile.attributeHistory}
+                  empty={{ title: 'No changes recorded', message: '' }}
+                />
+              </Section>
+            )}
+          </div>
+        )}
+
+        {tab === 'achievements' && (
+          <Section title="Achievements and awards">
+            <DataTable
+              columns={[
+                { key: 'awarded_date', label: 'Date', render: (r) => formatDate(r.awarded_date) },
+                { key: 'title', label: 'Award' },
+                { key: 'category', label: 'Category', render: (r) => titleCase(r.category) },
+                { key: 'level', label: 'Level', render: (r) => titleCase(r.level) },
+                { key: 'sport_name', label: 'Sport', render: (r) => r.sport_name || '—' },
+                { key: 'tournament_name', label: 'Competition', render: (r) => r.tournament_name || '—' },
+              ]}
+              rows={profile.achievements}
+              empty={{ title: 'No awards recorded', message: 'Player of the Match awards are created automatically when match results are entered.' }}
+            />
+          </Section>
+        )}
+
+        {tab === 'profile' && (
+          <div className="grid lg:grid-cols-3 gap-5">
+            <Section title="Athlete details" className="lg:col-span-2">
+              <dl className="p-4 grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {[
+                  ['Athlete ID', p.athlete_id],
+                  ['Full name', `${p.first_name} ${p.last_name}`],
+                  ['Date of birth', p.dob ? `${formatDate(p.dob)} (${ageFrom(p.dob)})` : '—'],
+                  ['Gender', titleCase(p.gender)],
+                  ['Nationality', p.nationality],
+                  ['Registered', formatDate(p.registration_date)],
+                  ['Height', p.height_cm ? `${p.height_cm} cm` : '—'],
+                  ['Weight', p.weight_kg ? `${p.weight_kg} kg` : '—'],
+                  ['Preferred hand', titleCase(p.preferred_hand)],
+                  ['Preferred foot', titleCase(p.preferred_foot)],
+                  ['Record visibility', titleCase(p.visibility)],
+                  ['Phone', p.phone],
+                  ['Email', p.email],
+                  ['Address', [p.address, p.city, p.country].filter(Boolean).join(', ')],
+                  ['Emergency contact', p.emergency_name ? `${p.emergency_name} · ${p.emergency_phone || ''}` : null],
+                  ['Guardian', p.guardian_name ? `${p.guardian_name} · ${p.guardian_phone || ''}` : null],
+                ].map(([label, value]) => (
+                  <div key={label}>
+                    <dt className="label">{label}</dt>
+                    <dd className="text-sm mt-1">{value || <span className="text-ink-200">—</span>}</dd>
+                  </div>
+                ))}
+              </dl>
+              {p._redacted && (
+                <p className="px-4 pb-4 text-xs text-ink-400">
+                  Contact and guardian details are restricted. Your role can see squad and performance information only.
+                </p>
+              )}
+            </Section>
+
+            <div className="space-y-5">
+              <Section title="Status history">
+                <ul className="divide-y divide-line">
+                  {profile.statusHistory.map((h) => (
+                    <li key={h.id} className="px-4 py-2.5 flex items-center justify-between gap-2">
+                      <span>
+                        <StatusChip status={h.status} />
+                        {h.reason && <span className="text-xs text-ink-400 block mt-1">{h.reason}</span>}
+                      </span>
+                      <span className="font-mono text-[11px] text-ink-400">
+                        {formatDate(h.effective_from)}{h.effective_to ? ` → ${formatDate(h.effective_to)}` : ''}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </Section>
+
+              {can('documents.read') && (
+                <Section title="Documents" subtitle="Restricted to staff roles">
+                  {profile.documents.length === 0
+                    ? <EmptyState title="No documents on file" message="Registration forms, ID and consent documents can be attached to this record." />
+                    : (
+                      <ul className="divide-y divide-line">
+                        {profile.documents.map((d) => (
+                          <li key={d.id} className="px-4 py-2.5 flex items-center justify-between gap-2">
+                            <span className="min-w-0">
+                              <span className="text-sm block truncate">{d.title}</span>
+                              <span className="text-[11px] text-ink-400">{titleCase(d.doc_type)}{d.expiry_date ? ` · expires ${formatDate(d.expiry_date)}` : ''}</span>
+                            </span>
+                            <button type="button" className="btn-quiet text-xs" onClick={() => api.download(`/media/documents/${d.id}/file`, d.title)}>Open</button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                </Section>
+              )}
+
+              <Section title="Media">
+                {profile.media.length === 0
+                  ? <EmptyState title="No media" message="Photos, highlights and certificates can be attached to this athlete." />
+                  : (
+                    <ul className="divide-y divide-line">
+                      {profile.media.map((m) => (
+                        <li key={m.id} className="px-4 py-2.5 flex items-center justify-between gap-2">
+                          <span className="text-sm truncate">{m.title}</span>
+                          <Chip tone={m.is_approved ? 'active' : 'trial'}>{m.is_approved ? 'Approved' : 'Pending'}</Chip>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+              </Section>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <EditPlayer open={editing} onClose={() => setEditing(false)} player={p} onSaved={load} />
+      <AddSport open={addingSport} onClose={() => setAddingSport(false)} playerId={id} sports={sports} existing={profile.sports} onSaved={load} />
+      <AddTimelineNote open={addingNote} onClose={() => setAddingNote(false)} playerId={id} sports={profile.sports} onSaved={load} />
+    </>
+  );
+}
+
+/** Sport-appropriate one-line summary of a single match. */
+function summariseMatch(code, c) {
+  if (!c) return '—';
+  const bits = [];
+  if (code === 'cricket') {
+    if (c.batted) bits.push(`${c.runs}${c.not_out ? '*' : ''} (${c.balls_faced})`);
+    if (c.bowled_spell) bits.push(`${c.wickets}/${c.runs_conceded}`);
+    if (c.catches) bits.push(`${c.catches} ct`);
+  } else if (code === 'football' || code === 'futsal') {
+    if (c.goals) bits.push(`${c.goals} goal${c.goals > 1 ? 's' : ''}`);
+    if (c.assists) bits.push(`${c.assists} assist${c.assists > 1 ? 's' : ''}`);
+    if (c.saves) bits.push(`${c.saves} saves`);
+    bits.push(`${c.minutes}'`);
+  } else if (code === 'basketball') {
+    bits.push(`${c.points} pts`, `${c.rebounds} reb`, `${c.assists} ast`);
+  } else {
+    bits.push(`${c.sets_won}–${c.sets_lost} sets`);
+    if (c.points_scored) bits.push(`${c.points_scored} pts`);
+  }
+  return bits.join(' · ') || '—';
+}
+
+function EditPlayer({ open, onClose, player, onSaved }) {
+  const [form, setForm] = useState({});
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => { if (open) { setForm({ ...player }); setError(null); } }, [open, player]);
+  const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
+
+  async function submit(e) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const fields = ['first_name', 'last_name', 'display_name', 'dob', 'gender', 'nationality', 'status',
+        'phone', 'email', 'address', 'city', 'country', 'emergency_name', 'emergency_phone', 'emergency_relation',
+        'guardian_name', 'guardian_phone', 'guardian_email', 'height_cm', 'weight_kg', 'preferred_hand',
+        'preferred_foot', 'visibility', 'bio'];
+      const payload = {};
+      fields.forEach((f) => { if (form[f] !== undefined && form[f] !== null) payload[f] = form[f]; });
+      if (form.status !== player.status) payload.status_reason = form.status_reason || null;
+      await api.put(`/players/${player.id}`, payload);
+      onSaved();
+      onClose();
+    } catch (err) { setError(err); } finally { setBusy(false); }
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title="Edit athlete record" wide>
+      <form onSubmit={submit} className="space-y-4">
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          <Field label="First name"><input className="input" value={form.first_name || ''} onChange={set('first_name')} /></Field>
+          <Field label="Last name"><input className="input" value={form.last_name || ''} onChange={set('last_name')} /></Field>
+          <Field label="Display name"><input className="input" value={form.display_name || ''} onChange={set('display_name')} /></Field>
+          <Field label="Date of birth"><input className="input" type="date" value={form.dob || ''} onChange={set('dob')} /></Field>
+          <Field label="Nationality"><input className="input" value={form.nationality || ''} onChange={set('nationality')} /></Field>
+          <Field label="Status" hint="Changes are added to the status history">
+            <select className="input" value={form.status || 'active'} onChange={set('status')}>
+              {['active', 'inactive', 'injured', 'on_loan', 'suspended', 'retired', 'alumni', 'trial'].map((s) => (
+                <option key={s} value={s}>{titleCase(s)}</option>
+              ))}
+            </select>
+          </Field>
+          {form.status !== player.status && (
+            <Field label="Reason for change" className="sm:col-span-2 lg:col-span-3">
+              <input className="input" value={form.status_reason || ''} onChange={set('status_reason')} placeholder="e.g. Hamstring strain, six weeks" />
+            </Field>
+          )}
+          <Field label="Phone"><input className="input" value={form.phone || ''} onChange={set('phone')} /></Field>
+          <Field label="Email"><input className="input" value={form.email || ''} onChange={set('email')} /></Field>
+          <Field label="City"><input className="input" value={form.city || ''} onChange={set('city')} /></Field>
+          <Field label="Height (cm)"><input className="input" type="number" step="0.1" value={form.height_cm || ''} onChange={set('height_cm')} /></Field>
+          <Field label="Weight (kg)"><input className="input" type="number" step="0.1" value={form.weight_kg || ''} onChange={set('weight_kg')} /></Field>
+          <Field label="Record visibility">
+            <select className="input" value={form.visibility || 'club'} onChange={set('visibility')}>
+              {['public', 'club', 'staff', 'private'].map((v) => <option key={v} value={v}>{titleCase(v)}</option>)}
+            </select>
+          </Field>
+          <Field label="Guardian name"><input className="input" value={form.guardian_name || ''} onChange={set('guardian_name')} /></Field>
+          <Field label="Guardian phone"><input className="input" value={form.guardian_phone || ''} onChange={set('guardian_phone')} /></Field>
+          <Field label="Emergency contact"><input className="input" value={form.emergency_name || ''} onChange={set('emergency_name')} /></Field>
+        </div>
+        <ErrorNote error={error} />
+        <div className="flex justify-end gap-2">
+          <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
+          <button type="submit" className="btn-gold" disabled={busy}>{busy ? 'Saving…' : 'Save changes'}</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function AddSport({ open, onClose, playerId, sports, existing, onSaved }) {
+  const [form, setForm] = useState({ sport_id: '', position: '', playing_level: 'academy', jersey_number: '', is_primary: 0 });
+  const [error, setError] = useState(null);
+  const available = sports.filter((s) => !existing.some((e) => e.sport_id === s.id));
+  const chosen = sports.find((s) => String(s.id) === String(form.sport_id));
+
+  useEffect(() => { if (open) { setForm({ sport_id: '', position: '', playing_level: 'academy', jersey_number: '', is_primary: 0 }); setError(null); } }, [open]);
+
+  async function submit(e) {
+    e.preventDefault();
+    setError(null);
+    try {
+      await api.post(`/players/${playerId}/sports`, {
+        ...form,
+        sport_id: Number(form.sport_id),
+        jersey_number: form.jersey_number === '' ? null : Number(form.jersey_number),
+      });
+      onSaved();
+      onClose();
+    } catch (err) { setError(err); }
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title="Add a sport">
+      <form onSubmit={submit} className="space-y-3">
+        <p className="text-sm text-ink-400">
+          The athlete keeps the same record and athlete ID. Statistics for each sport are kept separately.
+        </p>
+        <Field label="Sport">
+          <select className="input" required value={form.sport_id} onChange={(e) => setForm({ ...form, sport_id: e.target.value, position: '' })}>
+            <option value="">Choose a sport</option>
+            {available.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+        </Field>
+        <Field label="Position">
+          <select className="input" value={form.position} onChange={(e) => setForm({ ...form, position: e.target.value })} disabled={!chosen}>
+            <option value="">Not set</option>
+            {(chosen?.config?.positions || []).map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
+          </select>
+        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Playing level">
+            <select className="input" value={form.playing_level} onChange={(e) => setForm({ ...form, playing_level: e.target.value })}>
+              {['academy', 'development', 'senior', 'representative', 'recreational'].map((l) => <option key={l} value={l}>{titleCase(l)}</option>)}
+            </select>
+          </Field>
+          <Field label="Jersey number"><input className="input" type="number" value={form.jersey_number} onChange={(e) => setForm({ ...form, jersey_number: e.target.value })} /></Field>
+        </div>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={!!form.is_primary} onChange={(e) => setForm({ ...form, is_primary: e.target.checked ? 1 : 0 })} />
+          Make this the primary sport
+        </label>
+        <ErrorNote error={error} />
+        <div className="flex justify-end gap-2 pt-1">
+          <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
+          <button type="submit" className="btn-gold">Add sport</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function AddTimelineNote({ open, onClose, playerId, sports, onSaved }) {
+  const [form, setForm] = useState({ event_date: new Date().toISOString().slice(0, 10), event_type: 'note', title: '', description: '', sport_id: '', importance: 2 });
+  const [error, setError] = useState(null);
+
+  useEffect(() => { if (open) setError(null); }, [open]);
+
+  async function submit(e) {
+    e.preventDefault();
+    try {
+      await api.post(`/players/${playerId}/timeline`, {
+        ...form,
+        sport_id: form.sport_id ? Number(form.sport_id) : null,
+        importance: Number(form.importance),
+      });
+      onSaved();
+      onClose();
+    } catch (err) { setError(err); }
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title="Add a timeline entry">
+      <form onSubmit={submit} className="space-y-3">
+        <Field label="Date"><input className="input" type="date" required value={form.event_date} onChange={(e) => setForm({ ...form, event_date: e.target.value })} /></Field>
+        <Field label="Title"><input className="input" required placeholder="e.g. Selected for the district squad" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></Field>
+        <Field label="Description"><textarea className="input" rows={3} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Sport">
+            <select className="input" value={form.sport_id} onChange={(e) => setForm({ ...form, sport_id: e.target.value })}>
+              <option value="">Not sport specific</option>
+              {sports.map((s) => <option key={s.sport_id} value={s.sport_id}>{s.sport_name}</option>)}
+            </select>
+          </Field>
+          <Field label="Prominence">
+            <select className="input" value={form.importance} onChange={(e) => setForm({ ...form, importance: e.target.value })}>
+              <option value={1}>Routine</option><option value={2}>Notable</option><option value={3}>Milestone</option>
+            </select>
+          </Field>
+        </div>
+        <ErrorNote error={error} />
+        <div className="flex justify-end gap-2 pt-1">
+          <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
+          <button type="submit" className="btn-gold">Add entry</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}

@@ -1,0 +1,22 @@
+{
+  "name": "playerarc",
+  "version": "1.0.0",
+  "private": true,
+  "description": "PlayerArc — Athlete Records & Performance Management Platform for Karwan Sports Club",
+  "workspaces": ["server", "web"],
+  "scripts": {
+    "setup": "npm install && npm run db:reset",
+    "db:migrate": "npm run migrate --workspace server",
+    "db:seed": "npm run seed --workspace server",
+    "db:reset": "npm run reset --workspace server",
+    "dev": "concurrently -n api,web -c cyan,magenta \"npm run dev --workspace server\" \"npm run dev --workspace web\"",
+    "dev:server": "npm run dev --workspace server",
+    "dev:web": "npm run dev --workspace web",
+    "build": "npm run build --workspace web",
+    "start": "npm run start --workspace server"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  },
+  "engines": { "node": ">=20" }
+}
