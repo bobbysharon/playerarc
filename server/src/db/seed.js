@@ -139,7 +139,7 @@ async function main() {
   `);
 
   const accounts = [
-    ['admin@karwansc.com', 'Rahil Mansoor', 'super_admin', 0],
+    ['admin@karwansc.com', 'Bobby Sharon', 'super_admin', 0],
     ['director@karwansc.com', 'Nadia Farooqui', 'sports_director', 1],
     ['cricket.admin@karwansc.com', 'Imran Qureshi', 'sport_admin', 1],
     ['coach.cricket@karwansc.com', 'Yusuf Baig', 'coach', 1],
@@ -844,7 +844,7 @@ async function seedAdminOnly() {
   const hash = await bcrypt.hash('Karwan@2026', 10);
   const role = db.prepare(`SELECT id FROM roles WHERE key = 'super_admin'`).get();
   db.prepare(`INSERT OR IGNORE INTO users (email, password_hash, full_name, role_id, status) VALUES (?,?,?,?, 'active')`)
-    .run('admin@karwansc.com', hash, 'System Administrator', role.id);
+    .run('admin@karwansc.com', hash, 'Bobby Sharon', role.id);
   console.log('[seed] administrator account created: admin@karwansc.com / Karwan@2026');
 }
 

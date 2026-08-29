@@ -100,7 +100,7 @@ Password for all: `Karwan@2026`
 
 | Email | Role | What they see |
 | --- | --- | --- |
-| `admin@karwansc.com` | Super Admin | Everything, including users, settings and the audit log |
+| `admin@karwansc.com` | Super Admin (Bobby Sharon) | Everything, including users, settings and the audit log |
 | `director@karwansc.com` | Sports Director | All sports, athletes, teams, competitions and performance data |
 | `cricket.admin@karwansc.com` | Sport Administrator | Cricket only |
 | `coach.cricket@karwansc.com` | Coach | Only the cricket teams assigned to them; contact details are hidden |
