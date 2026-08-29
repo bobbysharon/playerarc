@@ -3,8 +3,8 @@
 # One-time setup: in the repository, open Settings → Pages and set
 # "Source" to "GitHub Actions". Then push to main.
 #
-# If your repository is not named "playerarc", change VITE_BASE below to
-# match — a project page is served from /<repository-name>/.
+# The base path comes from the repository name automatically, so this works
+# whatever the repository is called.
 
 name: Deploy demo to GitHub Pages
 
@@ -30,11 +30,13 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
-      - name: Install dependencies
-        run: npm install
+      # Only the web workspace is installed. The server depends on
+      # better-sqlite3, which compiles native code the static build never needs.
+      - name: Install web dependencies
+        run: npm ci --workspace web --include-workspace-root
 
       - name: Build the demo
         run: npm run build:demo
@@ -42,6 +44,8 @@ jobs:
           VITE_DEMO_MODE: 'true'
           VITE_BASE: /${{ github.event.repository.name }}/
 
+      # Stops GitHub Pages running the output through Jekyll, which would
+      # discard the assets directory.
       - name: Add .nojekyll
         run: touch web/dist/.nojekyll
 

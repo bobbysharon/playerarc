@@ -12,7 +12,7 @@ services:
     name: playerarc
     runtime: node
     plan: free
-    buildCommand: npm install && npm run build && npm run db:reset
+    buildCommand: npm ci --ignore-scripts && npm run build && npm run db:reset
     startCommand: npm start
     healthCheckPath: /api/health
     envVars:

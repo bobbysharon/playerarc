@@ -126,6 +126,16 @@ node scripts/smoke-test.mjs     # in another — 44 checks against the live API
 node scripts/demo-test.mjs      # 45 checks against the browser demo
 ```
 
+`package-lock.json` is committed, so every environment installs the same dependency tree.
+
+One wrinkle worth knowing: `better-sqlite3` ships prebuilt binaries inside its package, but npm
+still starts a `node-gyp` rebuild because the package contains a `binding.gyp`. That rebuild needs a
+C++ toolchain and network access to `nodejs.org`, and it produces a binary identical to the one
+already there. The Docker and Render builds therefore use `npm ci --ignore-scripts`, which uses the
+shipped binary. If you hit a `node-gyp` error installing locally, the same flag fixes it. The
+GitHub Pages build sidesteps this entirely — it installs only the `web` workspace, which has no
+native dependencies.
+
 ---
 
 ## How it is put together
