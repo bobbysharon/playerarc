@@ -248,7 +248,7 @@ function Scorecard({ match, config, lineup, performances, editable, onSaved }) {
           const setStat = (key, value) => setValues({ ...values, [p.player_id]: { ...v, [key]: value } });
           return (
             <details key={p.player_id} className="border border-line rounded-lg" open={lineup.length <= 6}>
-              <summary className="px-3 py-2.5 cursor-pointer flex items-center gap-3 hover:bg-canvas rounded-lg">
+              <summary className="px-3 py-2.5 cursor-pointer flex items-center gap-3 hover:bg-white/[0.04] rounded-lg">
                 <Avatar player={p} size={30} />
                 <span className="flex-1 min-w-0">
                   <span className="text-sm font-medium block truncate">{playerName(p)}</span>

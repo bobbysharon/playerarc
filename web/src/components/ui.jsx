@@ -4,6 +4,11 @@ import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar, RadarChart, Radar,
   PolarGrid, PolarAngleAxis, PolarRadiusAxis, XAxis, YAxis, Tooltip, CartesianGrid, Cell,
 } from 'recharts';
+import {
+  LayoutDashboard, Users, Shield, Megaphone, Trophy, Swords, Dumbbell, ClipboardCheck,
+  Award, BarChart3, FileText, Shapes, Settings as SettingsIcon, Search as SearchIcon,
+  LogOut, Menu, X, ChevronRight,
+} from 'lucide-react';
 import { useAuth } from '../lib/auth';
 import { api } from '../lib/api';
 import { STATUS_STYLES, titleCase, initials, playerName } from '../lib/format';
@@ -13,7 +18,7 @@ import { STATUS_STYLES, titleCase, initials, playerName } from '../lib/format';
 /* ------------------------------------------------------------------ */
 
 export function Chip({ children, tone }) {
-  const style = STATUS_STYLES[tone] || 'bg-ink-200/20 text-ink-600';
+  const style = STATUS_STYLES[tone] || 'bg-white/10 text-ink-600';
   return <span className={`chip ${style}`}>{children}</span>;
 }
 
@@ -28,14 +33,14 @@ export function Avatar({ player, size = 40 }) {
       <img
         src={url}
         alt=""
-        className="rounded-full object-cover border border-line shrink-0"
+        className="rounded-full object-cover shrink-0 ring-2 ring-gold/40"
         style={{ width: size, height: size }}
       />
     );
   }
   return (
     <span
-      className="rounded-full bg-ink text-white font-display font-semibold grid place-items-center shrink-0"
+      className="rounded-full bg-gold-grad text-[#1A1206] font-display font-semibold grid place-items-center shrink-0 ring-2 ring-gold/30"
       style={{ width: size, height: size, fontSize: size * 0.4 }}
     >
       {initials(player?.first_name, player?.last_name) || '—'}
@@ -83,9 +88,10 @@ export function PageHeader({ eyebrow, title, subtitle, actions, children }) {
     <div className="mb-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
-          {eyebrow && <p className="label mb-1">{eyebrow}</p>}
+          {eyebrow && <p className="label mb-1.5 text-gold">{eyebrow}</p>}
           <h1 className="font-display text-3xl sm:text-4xl leading-none text-ink">{title}</h1>
-          {subtitle && <p className="text-sm text-ink-400 mt-2 max-w-2xl">{subtitle}</p>}
+          <div className="accent-rule mt-2.5" />
+          {subtitle && <p className="text-sm text-ink-400 mt-2.5 max-w-2xl">{subtitle}</p>}
         </div>
         {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
       </div>
@@ -94,21 +100,37 @@ export function PageHeader({ eyebrow, title, subtitle, actions, children }) {
   );
 }
 
-export function StatTile({ label, value, hint, tone = 'ink', to }) {
+export function StatTile({ label, value, hint, tone = 'gold', icon: Icon, to }) {
   const tones = {
-    ink: 'text-ink',
-    gold: 'text-gold-dark',
-    pitch: 'text-pitch',
-    alert: 'text-alert',
+    gold: { text: 'text-gold', ring: 'from-gold/25', chip: 'bg-gold/15 text-gold' },
+    pitch: { text: 'text-pitch', ring: 'from-pitch/25', chip: 'bg-pitch/15 text-pitch' },
+    alert: { text: 'text-alert', ring: 'from-alert/25', chip: 'bg-alert/15 text-alert' },
+    sky: { text: 'text-sky', ring: 'from-sky/25', chip: 'bg-sky/15 text-sky' },
+    violet: { text: 'text-violet', ring: 'from-violet/25', chip: 'bg-violet/15 text-violet' },
+    ink: { text: 'text-ink', ring: 'from-white/10', chip: 'bg-white/5 text-ink-400' },
   };
+  const t = tones[tone] || tones.gold;
+
   const inner = (
     <>
-      <p className="label">{label}</p>
-      <p className={`font-display text-3xl leading-none mt-2 ${tones[tone]}`}>{value}</p>
-      {hint && <p className="text-xs text-ink-400 mt-1.5">{hint}</p>}
+      {/* a soft wash of the tile's own colour, top-left */}
+      <span className={`pointer-events-none absolute -top-8 -left-8 h-24 w-24 rounded-full bg-gradient-to-br ${t.ring} to-transparent blur-xl`} />
+      <div className="relative flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="label">{label}</p>
+          <p className={`font-display text-3xl leading-none mt-2 ${t.text}`}>{value}</p>
+          {hint && <p className="text-xs text-ink-400 mt-1.5">{hint}</p>}
+        </div>
+        {Icon && (
+          <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg ${t.chip}`}>
+            <Icon size={16} strokeWidth={2.2} />
+          </span>
+        )}
+      </div>
     </>
   );
-  const className = 'card p-4 block transition-shadow hover:shadow-lift';
+
+  const className = 'card relative overflow-hidden p-4 block transition-all hover:border-line-bright hover:shadow-lift hover:-translate-y-0.5';
   return to ? <Link to={to} className={className}>{inner}</Link> : <div className={className}>{inner}</div>;
 }
 
@@ -116,10 +138,13 @@ export function Section({ title, subtitle, actions, children, className = '' }) 
   return (
     <section className={`card ${className}`}>
       {(title || actions) && (
-        <header className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-b border-line">
-          <div>
-            <h2 className="font-display text-lg leading-none">{title}</h2>
-            {subtitle && <p className="text-xs text-ink-400 mt-1">{subtitle}</p>}
+        <header className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-b border-line bg-white/[0.02]">
+          <div className="flex items-center gap-2.5">
+            <span className="h-4 w-1 rounded-full bg-gold-grad" />
+            <div>
+              <h2 className="font-display text-lg leading-none text-ink">{title}</h2>
+              {subtitle && <p className="text-xs text-ink-400 mt-1">{subtitle}</p>}
+            </div>
           </div>
           {actions && <div className="flex gap-2">{actions}</div>}
         </header>
@@ -144,10 +169,13 @@ export function Modal({ open, onClose, title, children, wide = false }) {
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-6">
-      <div className="absolute inset-0 bg-ink/50" onClick={onClose} />
-      <div className={`relative bg-white rounded-t-2xl sm:rounded-xl shadow-lift w-full ${wide ? 'max-w-4xl' : 'max-w-lg'} max-h-[92vh] flex flex-col`}>
-        <header className="flex items-center justify-between px-5 py-3.5 border-b border-line">
-          <h2 className="font-display text-xl">{title}</h2>
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
+      <div className={`relative bg-surface border border-line rounded-t-2xl sm:rounded-xl shadow-lift w-full ${wide ? 'max-w-4xl' : 'max-w-lg'} max-h-[92vh] flex flex-col animate-fade-up`}>
+        <header className="flex items-center justify-between px-5 py-3.5 border-b border-line bg-white/[0.02]">
+          <h2 className="font-display text-xl flex items-center gap-2.5">
+            <span className="h-4 w-1 rounded-full bg-gold-grad" />
+            {title}
+          </h2>
           <button type="button" onClick={onClose} className="btn-quiet px-2 py-1" aria-label="Close">✕</button>
         </header>
         <div className="overflow-y-auto scroll-thin px-5 py-4">{children}</div>
@@ -178,12 +206,16 @@ export function Tabs({ tabs, active, onChange }) {
             onClick={() => onChange(t.key)}
             className={`px-3.5 py-2.5 text-sm font-semibold border-b-2 -mb-px transition-colors whitespace-nowrap ${
               active === t.key
-                ? 'border-gold text-ink'
+                ? 'border-gold text-gold'
                 : 'border-transparent text-ink-400 hover:text-ink'
             }`}
           >
             {t.label}
-            {t.count != null && <span className="ml-1.5 text-xs text-ink-200">{t.count}</span>}
+            {t.count != null && (
+              <span className={`ml-1.5 rounded-full px-1.5 py-0.5 text-[10px] ${active === t.key ? 'bg-gold/20 text-gold' : 'bg-white/5 text-ink-200'}`}>
+                {t.count}
+              </span>
+            )}
           </button>
         ))}
       </div>
@@ -198,7 +230,7 @@ export function DataTable({ columns, rows, empty, onRowClick, dense = false }) {
   return (
     <div className="overflow-x-auto scroll-thin">
       <table className="w-full min-w-max">
-        <thead className="bg-canvas">
+        <thead className="bg-surface-sunken">
           <tr>{columns.map((c) => <th key={c.key} className={`th ${c.align === 'right' ? 'text-right' : ''}`}>{c.label}</th>)}</tr>
         </thead>
         <tbody>
@@ -206,7 +238,7 @@ export function DataTable({ columns, rows, empty, onRowClick, dense = false }) {
             <tr
               key={row.id ?? i}
               onClick={onRowClick ? () => onRowClick(row) : undefined}
-              className={`${onRowClick ? 'cursor-pointer hover:bg-canvas' : ''} ${dense ? '[&_td]:py-1.5' : ''}`}
+              className={`transition-colors ${onRowClick ? 'cursor-pointer hover:bg-white/[0.04]' : 'hover:bg-white/[0.02]'} ${dense ? '[&_td]:py-1.5' : ''}`}
             >
               {columns.map((c) => (
                 <td key={c.key} className={`td ${c.align === 'right' ? 'text-right' : ''} ${c.mono ? 'stat-value' : ''}`}>
@@ -225,51 +257,63 @@ export function DataTable({ columns, rows, empty, onRowClick, dense = false }) {
 /* Charts                                                              */
 /* ------------------------------------------------------------------ */
 
-const AXIS = { stroke: '#9DAEBB', fontSize: 11, fontFamily: 'IBM Plex Mono, monospace' };
+const AXIS = { stroke: '#64748B', fontSize: 11, fontFamily: 'IBM Plex Mono, monospace' };
+const GRID = '#1E293B';
 const TOOLTIP = {
   contentStyle: {
-    borderRadius: 8, border: '1px solid #DFE5EA', fontSize: 12,
-    fontFamily: 'Inter, sans-serif', boxShadow: '0 8px 28px rgba(14,34,51,0.12)',
+    borderRadius: 10, border: '1px solid #2A3A52', background: '#0F172A',
+    fontSize: 12, fontFamily: 'Inter, sans-serif', boxShadow: '0 12px 36px rgba(0,0,0,0.5)',
+    color: '#F8FAFC',
   },
+  labelStyle: { color: '#94A3B8' },
+  itemStyle: { color: '#F8FAFC' },
 };
+
+/** Categorical palette for multi-series charts. */
+export const CHART_COLORS = ['#F59E0B', '#38BDF8', '#10B981', '#8B5CF6', '#D946EF', '#EA580C', '#06B6D4'];
 
 export function TrendChart({ data, xKey = 'date', series, height = 220, domain }) {
   if (!data?.length) return <EmptyState title="No data yet" message="Records will appear here once they are entered." />;
   return (
     <ResponsiveContainer width="100%" height={height}>
       <LineChart data={data} margin={{ top: 8, right: 12, bottom: 4, left: -18 }}>
-        <CartesianGrid stroke="#EEF2F5" vertical={false} />
+        <CartesianGrid stroke={GRID} vertical={false} />
         <XAxis dataKey={xKey} tick={AXIS} axisLine={false} tickLine={false} />
         <YAxis tick={AXIS} axisLine={false} tickLine={false} domain={domain || ['auto', 'auto']} />
-        <Tooltip {...TOOLTIP} />
-        {series.map((s) => (
-          <Line
-            key={s.key}
-            type="monotone"
-            dataKey={s.key}
-            name={s.label}
-            stroke={s.color || '#0E2233'}
-            strokeWidth={2}
-            dot={{ r: 3, strokeWidth: 0, fill: s.color || '#0E2233' }}
-            activeDot={{ r: 5 }}
-          />
-        ))}
+        <Tooltip {...TOOLTIP} cursor={{ stroke: '#2A3A52' }} />
+        {series.map((s, i) => {
+          const color = s.color || CHART_COLORS[i % CHART_COLORS.length];
+          return (
+            <Line
+              key={s.key}
+              type="monotone"
+              dataKey={s.key}
+              name={s.label}
+              stroke={color}
+              strokeWidth={2.5}
+              dot={{ r: 3, strokeWidth: 0, fill: color }}
+              activeDot={{ r: 6, strokeWidth: 2, stroke: '#0F172A' }}
+            />
+          );
+        })}
       </LineChart>
     </ResponsiveContainer>
   );
 }
 
-export function BarsChart({ data, xKey, barKey, height = 220, color = '#0E2233', colors }) {
+export function BarsChart({ data, xKey, barKey, height = 220, color = '#F59E0B', colors }) {
   if (!data?.length) return <EmptyState title="No data yet" message="Records will appear here once they are entered." />;
   return (
     <ResponsiveContainer width="100%" height={height}>
       <BarChart data={data} margin={{ top: 8, right: 12, bottom: 4, left: -18 }}>
-        <CartesianGrid stroke="#EEF2F5" vertical={false} />
+        <CartesianGrid stroke={GRID} vertical={false} />
         <XAxis dataKey={xKey} tick={AXIS} axisLine={false} tickLine={false} />
         <YAxis tick={AXIS} axisLine={false} tickLine={false} allowDecimals={false} />
-        <Tooltip {...TOOLTIP} cursor={{ fill: '#F4F6F8' }} />
-        <Bar dataKey={barKey} radius={[4, 4, 0, 0]}>
-          {data.map((d, i) => <Cell key={i} fill={colors ? colors[i % colors.length] : (d.color || color)} />)}
+        <Tooltip {...TOOLTIP} cursor={{ fill: 'rgba(255,255,255,0.04)' }} />
+        <Bar dataKey={barKey} radius={[6, 6, 0, 0]}>
+          {data.map((d, i) => (
+            <Cell key={i} fill={colors ? colors[i % colors.length] : (d.color || CHART_COLORS[i % CHART_COLORS.length] || color)} />
+          ))}
         </Bar>
       </BarChart>
     </ResponsiveContainer>
@@ -282,11 +326,11 @@ export function RatingRadar({ components, height = 240 }) {
   return (
     <ResponsiveContainer width="100%" height={height}>
       <RadarChart data={data} outerRadius="72%">
-        <PolarGrid stroke="#DFE5EA" />
+        <PolarGrid stroke={GRID} />
         <PolarAngleAxis dataKey="subject" tick={{ ...AXIS, fontFamily: 'Inter, sans-serif', fontSize: 11 }} />
         <PolarRadiusAxis domain={[0, 100]} tick={false} axisLine={false} />
         <Tooltip {...TOOLTIP} />
-        <Radar dataKey="score" stroke="#C8952F" fill="#C8952F" fillOpacity={0.28} strokeWidth={2} />
+        <Radar dataKey="score" stroke="#F59E0B" fill="#F59E0B" fillOpacity={0.3} strokeWidth={2.5} />
       </RadarChart>
     </ResponsiveContainer>
   );
@@ -306,7 +350,13 @@ export function PlayerCard({ player, sports = [], teams = [] }) {
         <div className="flex flex-wrap gap-1.5 mt-2">
           <StatusChip status={player.status} />
           {sports.slice(0, 2).map((s) => (
-            <span key={s.id || s.sport_id} className="chip bg-canvas text-ink-600">{s.sport_name}</span>
+            <span
+              key={s.id || s.sport_id}
+              className="chip border"
+              style={{ background: `${s.color}22`, color: s.color, borderColor: `${s.color}55` }}
+            >
+              {s.sport_name}
+            </span>
           ))}
         </div>
         {teams.length > 0 && (
@@ -340,25 +390,30 @@ export function CareerSpine({ events, compact = false }) {
     <div className={compact ? '' : 'pr-2'}>
       {Object.entries(byYear).sort((a, b) => b[0].localeCompare(a[0])).map(([year, items]) => (
         <div key={year} className="relative">
-          <div className="sticky top-0 z-10 bg-white/95 backdrop-blur-sm py-2 pl-1">
-            <span className="font-display text-2xl text-ink-200">{year}</span>
+          <div className="sticky top-0 z-10 bg-surface/95 backdrop-blur-sm py-2 pl-1">
+            <span className="font-display text-2xl bg-gold-grad bg-clip-text text-transparent">{year}</span>
           </div>
           <ol className="relative ml-4 border-l-2 border-line">
             {items.map((e) => (
               <li key={e.id} className="relative pl-6 pb-5">
                 <span
                   className={`absolute -left-[9px] top-0.5 grid place-items-center h-4 w-4 rounded-full text-[9px] ${
-                    e.importance === 3 ? 'bg-gold text-ink' : e.importance === 2 ? 'bg-ink text-white' : 'bg-line text-ink-400'
+                    e.importance === 3 ? 'bg-gold text-ink' : e.importance === 2 ? 'chip-active' : 'bg-line text-ink-400'
                   }`}
                   aria-hidden
                 >
                   {ICONS[e.event_type] || '·'}
                 </span>
                 <p className="text-[11px] font-mono text-ink-400">{e.event_date}</p>
-                <p className={`text-sm ${e.importance === 3 ? 'font-semibold text-ink' : 'text-ink-700'}`}>{e.title}</p>
+                <p className={`text-sm ${e.importance === 3 ? 'font-semibold text-gold' : 'text-ink-700'}`}>{e.title}</p>
                 {e.description && <p className="text-xs text-ink-400 mt-0.5">{e.description}</p>}
                 {e.sport_name && (
-                  <span className="chip bg-canvas text-ink-600 mt-1.5">{e.sport_name}</span>
+                  <span
+                    className="chip mt-1.5 border"
+                    style={{ background: `${e.color || '#94A3B8'}22`, color: e.color || '#94A3B8', borderColor: `${e.color || '#94A3B8'}55` }}
+                  >
+                    {e.sport_name}
+                  </span>
                 )}
               </li>
             ))}
@@ -377,12 +432,15 @@ export function StatGrid({ groups }) {
     <div className="space-y-5">
       {filled.map((group) => (
         <div key={group.key}>
-          <p className="label mb-2">{group.label}</p>
+          <p className="label mb-2 flex items-center gap-2">
+            <span className="h-px w-4 bg-gold-grad" />
+            {group.label}
+          </p>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-px bg-line rounded-lg overflow-hidden border border-line">
             {group.stats.map((s) => (
-              <div key={s.key} className="bg-white px-3 py-2.5">
+              <div key={s.key} className="bg-surface px-3 py-2.5 transition-colors hover:bg-surface-raised">
                 <p className="text-[10px] uppercase tracking-wide text-ink-400 truncate" title={s.label}>{s.label}</p>
-                <p className="stat-value text-lg text-ink mt-0.5">{s.display}</p>
+                <p className="stat-value text-lg mt-0.5">{s.display}</p>
               </div>
             ))}
           </div>
@@ -400,14 +458,20 @@ export function RatingDial({ rating, size = 96 }) {
   return (
     <div className="flex items-center gap-4">
       <svg width={size} height={size} className="shrink-0" role="img" aria-label={`Performance rating ${pct} out of 100`}>
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#EEF2F5" strokeWidth="8" />
+        <defs>
+          <linearGradient id="ratingArc" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stopColor="#F59E0B" />
+            <stop offset="100%" stopColor="#EA580C" />
+          </linearGradient>
+        </defs>
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#1E293B" strokeWidth="8" />
         <circle
-          cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#C8952F" strokeWidth="8"
+          cx={size / 2} cy={size / 2} r={r} fill="none" stroke="url(#ratingArc)" strokeWidth="8"
           strokeDasharray={`${(pct / 100) * c} ${c}`} strokeLinecap="round"
           transform={`rotate(-90 ${size / 2} ${size / 2})`}
         />
         <text x="50%" y="52%" textAnchor="middle" dominantBaseline="middle"
-          className="font-display" style={{ fontSize: size * 0.28, fill: '#0E2233' }}>
+          className="font-display" style={{ fontSize: size * 0.3, fill: '#F8FAFC' }}>
           {pct}
         </text>
       </svg>
@@ -418,8 +482,8 @@ export function RatingDial({ rating, size = 96 }) {
               <span className="truncate">{c2.label}</span>
               <span className="stat-value text-ink">{c2.score}</span>
             </div>
-            <div className="h-1.5 bg-canvas rounded-full overflow-hidden">
-              <div className="h-full bg-ink rounded-full" style={{ width: `${c2.score}%` }} />
+            <div className="h-1.5 bg-surface-sunken rounded-full overflow-hidden">
+              <div className="h-full rounded-full bg-gold-grad" style={{ width: `${c2.score}%` }} />
             </div>
           </div>
         ))}
@@ -433,19 +497,31 @@ export function RatingDial({ rating, size = 96 }) {
 /* ------------------------------------------------------------------ */
 
 const NAV = [
-  { to: '/', label: 'Dashboard', permission: null, exact: true },
-  { to: '/players', label: 'Athletes', permission: 'players.read' },
-  { to: '/teams', label: 'Teams', permission: 'teams.read' },
-  { to: '/coaches', label: 'Coaches', permission: 'coaches.read' },
-  { to: '/tournaments', label: 'Tournaments', permission: 'tournaments.read' },
-  { to: '/matches', label: 'Matches', permission: 'matches.read' },
-  { to: '/training', label: 'Training', permission: 'training.read' },
-  { to: '/assessments', label: 'Assessments', permission: 'assessments.read' },
-  { to: '/achievements', label: 'Achievements', permission: 'achievements.read' },
-  { to: '/rankings', label: 'Rankings', permission: 'rankings.read' },
-  { to: '/reports', label: 'Reports', permission: 'reports.read' },
-  { to: '/sports', label: 'Sports', permission: 'sports.read' },
-  { to: '/settings', label: 'Settings', permission: null },
+  { group: 'Overview', items: [
+    { to: '/', label: 'Dashboard', icon: LayoutDashboard, permission: null, exact: true },
+  ] },
+  { group: 'People', items: [
+    { to: '/players', label: 'Athletes', icon: Users, permission: 'players.read' },
+    { to: '/teams', label: 'Teams', icon: Shield, permission: 'teams.read' },
+    { to: '/coaches', label: 'Coaches', icon: Megaphone, permission: 'coaches.read' },
+  ] },
+  { group: 'Competition', items: [
+    { to: '/tournaments', label: 'Tournaments', icon: Trophy, permission: 'tournaments.read' },
+    { to: '/matches', label: 'Matches', icon: Swords, permission: 'matches.read' },
+  ] },
+  { group: 'Development', items: [
+    { to: '/training', label: 'Training', icon: Dumbbell, permission: 'training.read' },
+    { to: '/assessments', label: 'Assessments', icon: ClipboardCheck, permission: 'assessments.read' },
+    { to: '/achievements', label: 'Achievements', icon: Award, permission: 'achievements.read' },
+  ] },
+  { group: 'Analysis', items: [
+    { to: '/rankings', label: 'Rankings', icon: BarChart3, permission: 'rankings.read' },
+    { to: '/reports', label: 'Reports', icon: FileText, permission: 'reports.read' },
+  ] },
+  { group: 'Club', items: [
+    { to: '/sports', label: 'Sports', icon: Shapes, permission: 'sports.read' },
+    { to: '/settings', label: 'Settings', icon: SettingsIcon, permission: null },
+  ] },
 ];
 
 function GlobalSearch() {
@@ -488,28 +564,31 @@ function GlobalSearch() {
 
   return (
     <div ref={box} className="relative flex-1 max-w-md">
-      <input
-        className="input bg-ink-700 border-ink-600 text-white placeholder:text-ink-200 focus:border-gold"
-        placeholder="Search athletes, teams, tournaments…"
-        value={q}
-        onChange={(e) => { setQ(e.target.value); setOpen(true); }}
-        onFocus={() => setOpen(true)}
-        aria-label="Search"
-      />
+      <span className="relative block">
+        <SearchIcon size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
+        <input
+          className="input pl-9"
+          placeholder="Search athletes, teams, tournaments…"
+          value={q}
+          onChange={(e) => { setQ(e.target.value); setOpen(true); }}
+          onFocus={() => setOpen(true)}
+          aria-label="Search"
+        />
+      </span>
       {open && q.trim().length >= 2 && (
-        <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-xl shadow-lift border border-line max-h-[70vh] overflow-y-auto scroll-thin z-50">
+        <div className="absolute top-full left-0 right-0 mt-2 bg-surface rounded-xl shadow-lift border border-line-bright max-h-[70vh] overflow-y-auto scroll-thin z-50 animate-fade-up">
           {!groups.length && <p className="px-4 py-6 text-sm text-ink-400 text-center">No matches for “{q}”. Try an athlete ID or a team name.</p>}
           {groups.map((g) => (
             <div key={g.key} className="py-1.5">
-              <p className="label px-4 py-1">{g.label}</p>
+              <p className="label px-4 py-1 text-gold">{g.label}</p>
               {g.items.map((r) => (
                 <button
                   key={`${g.key}-${r.id}`}
                   type="button"
                   onClick={() => go(g.to(r))}
-                  className="w-full text-left px-4 py-2 hover:bg-canvas flex items-center justify-between gap-3"
+                  className="w-full text-left px-4 py-2 hover:bg-white/5 flex items-center justify-between gap-3 group"
                 >
-                  <span className="text-sm text-ink truncate">{g.primary(r)}</span>
+                  <span className="text-sm text-ink truncate group-hover:text-gold transition-colors">{g.primary(r)}</span>
                   <span className="font-mono text-[11px] text-ink-400 shrink-0">{g.secondary(r)}</span>
                 </button>
               ))}
@@ -526,59 +605,101 @@ export function AppShell({ children }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const navigate = useNavigate();
 
-  const items = NAV.filter((n) => !n.permission || can(n.permission) || user?.role === 'player' || user?.role === 'guardian');
+  const allowed = (n) => !n.permission || can(n.permission) || user?.role === 'player' || user?.role === 'guardian';
+  const groups = NAV
+    .map((g) => ({ ...g, items: g.items.filter(allowed) }))
+    .filter((g) => g.items.length);
 
   return (
     <div className="min-h-screen flex flex-col lg:flex-row">
       {/* Rail */}
-      <aside className="lg:w-56 lg:shrink-0 bg-ink text-white lg:min-h-screen lg:sticky lg:top-0 lg:h-screen flex flex-col">
+      <aside className="lg:w-60 lg:shrink-0 bg-surface/80 backdrop-blur-xl border-b lg:border-b-0 lg:border-r border-line lg:min-h-screen lg:sticky lg:top-0 lg:h-screen flex flex-col">
         <div className="flex items-center justify-between px-4 py-3.5 lg:py-5">
-          <Link to="/" className="flex items-center gap-2.5">
-            <span className="h-8 w-8 rounded-lg bg-gold grid place-items-center font-display text-ink text-lg leading-none">P</span>
+          <Link to="/" className="flex items-center gap-2.5 group">
+            <span className="h-9 w-9 rounded-xl bg-gold-grad grid place-items-center font-display text-[#1A1206] text-xl leading-none shadow-glow-sm transition-transform group-hover:scale-105">
+              P
+            </span>
             <span>
-              <span className="font-display text-xl leading-none block">PlayerArc</span>
-              <span className="text-[10px] uppercase tracking-[0.18em] text-ink-200">Karwan Sports Club</span>
+              <span className="font-display text-xl leading-none block bg-gold-grad bg-clip-text text-transparent">
+                PlayerArc
+              </span>
+              <span className="text-[10px] uppercase tracking-[0.18em] text-ink-400">Karwan Sports Club</span>
             </span>
           </Link>
-          <button type="button" className="lg:hidden btn-quiet text-white px-2" onClick={() => setMenuOpen(!menuOpen)} aria-expanded={menuOpen}>
-            {menuOpen ? '✕' : '☰'}
+          <button
+            type="button"
+            className="lg:hidden btn-quiet px-2"
+            onClick={() => setMenuOpen(!menuOpen)}
+            aria-expanded={menuOpen}
+            aria-label={menuOpen ? 'Close menu' : 'Open menu'}
+          >
+            {menuOpen ? <X size={18} /> : <Menu size={18} />}
           </button>
         </div>
 
-        <nav className={`${menuOpen ? 'block' : 'hidden'} lg:block flex-1 overflow-y-auto scroll-thin px-2 pb-3`}>
-          {items.map((n) => (
-            <NavLink
-              key={n.to}
-              to={n.to}
-              end={n.exact}
-              onClick={() => setMenuOpen(false)}
-              className={({ isActive }) =>
-                `flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium mb-0.5 transition-colors ${
-                  isActive ? 'bg-ink-700 text-white border-l-2 border-gold' : 'text-ink-200 hover:text-white hover:bg-ink-700/60'
-                }`
-              }
-            >
-              {n.label}
-            </NavLink>
+        <nav className={`${menuOpen ? 'block' : 'hidden'} lg:block flex-1 overflow-y-auto scroll-thin px-2.5 pb-3`}>
+          {groups.map((g) => (
+            <div key={g.group} className="mb-3">
+              <p className="px-2.5 mb-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-ink-200">
+                {g.group}
+              </p>
+              {g.items.map((n) => (
+                <NavLink
+                  key={n.to}
+                  to={n.to}
+                  end={n.exact}
+                  onClick={() => setMenuOpen(false)}
+                  className={({ isActive }) =>
+                    `group relative flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm font-medium mb-0.5 transition-all ${
+                      isActive
+                        ? 'bg-gold-grad-soft text-gold'
+                        : 'text-ink-400 hover:text-ink hover:bg-white/5'
+                    }`
+                  }
+                >
+                  {({ isActive }) => (
+                    <>
+                      {isActive && <span className="absolute left-0 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-gold-grad" />}
+                      <n.icon size={16} strokeWidth={2.1} className="shrink-0" />
+                      <span className="truncate">{n.label}</span>
+                      {isActive && <ChevronRight size={14} className="ml-auto opacity-60" />}
+                    </>
+                  )}
+                </NavLink>
+              ))}
+            </div>
           ))}
         </nav>
 
-        <div className={`${menuOpen ? 'block' : 'hidden'} lg:block border-t border-ink-600 px-4 py-3`}>
-          <p className="text-sm font-medium truncate">{user?.fullName}</p>
-          <p className="text-[11px] text-ink-200">{user?.roleName}</p>
-          <button type="button" onClick={async () => { await signOut(); navigate('/login'); }} className="mt-2 text-xs text-gold hover:underline">
-            Sign out
-          </button>
+        <div className={`${menuOpen ? 'block' : 'hidden'} lg:block border-t border-line px-3 py-3`}>
+          <div className="flex items-center gap-2.5 rounded-lg bg-white/[0.03] px-2.5 py-2">
+            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-gold-grad text-[#1A1206] font-display text-sm">
+              {(user?.fullName || '?').split(' ').map((w) => w[0]).slice(0, 2).join('')}
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="text-sm font-medium truncate block text-ink">{user?.fullName}</span>
+              <span className="text-[11px] text-gold">{user?.roleName}</span>
+            </span>
+            <button
+              type="button"
+              onClick={async () => { await signOut(); navigate('/login'); }}
+              className="btn-quiet px-1.5 py-1"
+              aria-label="Sign out"
+              title="Sign out"
+            >
+              <LogOut size={15} />
+            </button>
+          </div>
         </div>
       </aside>
 
       {/* Content */}
       <div className="flex-1 min-w-0 flex flex-col">
-        <header className="bg-ink text-white px-4 py-2.5 flex items-center gap-3 sticky top-0 z-40 lg:static">
+        <header className="bg-canvas/80 backdrop-blur-xl border-b border-line px-4 py-2.5 flex items-center gap-3 sticky top-0 z-40">
           <GlobalSearch />
         </header>
-        <main className="flex-1 px-4 sm:px-6 py-6 max-w-[1500px] w-full mx-auto">{children}</main>
-        <footer className="px-6 py-4 text-[11px] text-ink-400 border-t border-line">
+        <main className="flex-1 px-4 sm:px-6 py-6 max-w-[1500px] w-full mx-auto animate-fade-up">{children}</main>
+        <footer className="px-6 py-4 text-[11px] text-ink-200 border-t border-line">
           PlayerArc · the athlete record system of Karwan Sports Club
         </footer>
       </div>

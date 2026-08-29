@@ -2,44 +2,123 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * PlayerArc — dark theme.
+ *
+ * Near-black base, slate panels, and an amber-to-orange gradient carrying
+ * everything primary. Each sport also brings its own colour from the database,
+ * so the interface picks up cricket green, football blue, basketball orange and
+ * so on wherever sport data is shown.
+ */
+
 @layer base {
-  html { -webkit-text-size-adjust: 100%; }
+  html {
+    -webkit-text-size-adjust: 100%;
+    color-scheme: dark;
+  }
   body {
     @apply bg-canvas text-ink font-sans antialiased;
+    background-image: theme('backgroundImage.aurora');
+    background-attachment: fixed;
+    background-repeat: no-repeat;
   }
-  /* Condensed display face carries the scoreboard/jersey character. */
   h1, h2, h3, .display {
     @apply font-display tracking-tight;
   }
   :focus-visible {
-    outline: 2px solid #C8952F;
+    outline: 2px solid #F59E0B;
     outline-offset: 2px;
+  }
+  ::selection {
+    background: rgba(245, 158, 11, 0.3);
+  }
+  /* Native controls read as dark rather than bright white */
+  select option {
+    background: #0F172A;
+    color: #F8FAFC;
+  }
+  input[type='date'], input[type='time'], input[type='datetime-local'] {
+    color-scheme: dark;
+  }
+  input[type='checkbox'] {
+    @apply h-4 w-4 rounded border-line bg-surface-sunken text-gold;
+    accent-color: #F59E0B;
   }
 }
 
 @layer components {
-  .card { @apply bg-white border border-line rounded-xl shadow-card; }
-  .label { @apply text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-400; }
-  .stat-value { @apply font-mono font-semibold tabular-nums; }
+  .card {
+    @apply bg-surface border border-line rounded-xl shadow-card;
+  }
+  /* A card that catches the eye — used for headers and hero panels */
+  .card-glow {
+    @apply card relative overflow-hidden;
+    background-image: theme('backgroundImage.surface-grad');
+  }
+
+  .label {
+    @apply text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-400;
+  }
+  .stat-value {
+    @apply font-mono font-semibold tabular-nums text-ink;
+  }
+
   .btn {
     @apply inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-semibold
-           transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+           transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed;
   }
-  .btn-primary { @apply btn bg-ink text-white hover:bg-ink-700; }
-  .btn-gold { @apply btn bg-gold text-ink hover:bg-gold-dark hover:text-white; }
-  .btn-ghost { @apply btn border border-line bg-white text-ink hover:bg-canvas; }
-  .btn-quiet { @apply btn text-ink-600 hover:bg-canvas; }
+  /* The signature control: amber to orange, dark text, glow on hover */
+  .btn-gold {
+    @apply btn text-[#1A1206] shadow-glow-sm hover:shadow-glow hover:-translate-y-px;
+    background-image: theme('backgroundImage.gold-grad');
+  }
+  .btn-primary {
+    @apply btn bg-surface-raised text-ink border border-line-bright hover:border-gold/50 hover:text-gold;
+  }
+  .btn-ghost {
+    @apply btn border border-line bg-surface/60 text-ink-600 hover:text-ink hover:border-line-bright hover:bg-surface-raised;
+  }
+  .btn-quiet {
+    @apply btn text-ink-400 hover:text-gold hover:bg-white/5;
+  }
+  .btn-danger {
+    @apply btn bg-alert/15 text-alert border border-alert/40 hover:bg-alert/25;
+  }
+
   .input {
-    @apply w-full rounded-lg border border-line bg-white px-3 py-2 text-sm text-ink
-           placeholder:text-ink-200 focus:border-ink-400 focus:outline-none focus:ring-2 focus:ring-gold/30;
+    @apply w-full rounded-lg border border-line bg-surface-sunken px-3 py-2 text-sm text-ink
+           placeholder:text-ink-200 transition-colors
+           focus:border-gold/60 focus:outline-none focus:ring-2 focus:ring-gold/25;
   }
+
   .chip {
     @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold
            uppercase tracking-wide;
   }
-  .th { @apply px-3 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-400; }
-  .td { @apply px-3 py-2.5 text-sm border-t border-line align-middle; }
-  .link { @apply text-ink font-medium underline decoration-gold decoration-2 underline-offset-2 hover:text-gold-dark; }
+  /* Selected filter pill */
+  .chip-active {
+    @apply chip text-[#1A1206] shadow-glow-sm;
+    background-image: theme('backgroundImage.gold-grad');
+  }
+  .chip-idle {
+    @apply chip bg-surface-raised border border-line text-ink-400 hover:text-ink hover:border-line-bright;
+  }
+
+  .th {
+    @apply px-3 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-400;
+  }
+  .td {
+    @apply px-3 py-2.5 text-sm border-t border-line align-middle text-ink-700;
+  }
+  .link {
+    @apply text-gold font-medium hover:text-gold-glow transition-colors;
+  }
+
+  /* Thin coloured rule used to head a coloured section */
+  .accent-rule {
+    @apply h-1 w-10 rounded-full;
+    background-image: theme('backgroundImage.gold-grad');
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -49,6 +128,7 @@
   }
 }
 
-/* Scrollbars inside data panels stay unobtrusive. */
 .scroll-thin::-webkit-scrollbar { height: 8px; width: 8px; }
-.scroll-thin::-webkit-scrollbar-thumb { background: #DFE5EA; border-radius: 8px; }
+.scroll-thin::-webkit-scrollbar-track { background: transparent; }
+.scroll-thin::-webkit-scrollbar-thumb { background: #1E293B; border-radius: 8px; }
+.scroll-thin::-webkit-scrollbar-thumb:hover { background: #2A3A52; }

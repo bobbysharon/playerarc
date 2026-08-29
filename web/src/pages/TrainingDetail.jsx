@@ -86,7 +86,7 @@ export default function TrainingDetail() {
             <div>
               <p className="label mb-1">Skills assessed</p>
               <div className="flex flex-wrap gap-1.5">
-                {s.skills?.length ? s.skills.map((k, i) => <span key={i} className="chip bg-canvas text-ink-600">{k}</span>) : <span className="text-ink-200">None recorded</span>}
+                {s.skills?.length ? s.skills.map((k, i) => <span key={i} className="chip bg-white/5 text-ink-400 border border-line">{k}</span>) : <span className="text-ink-200">None recorded</span>}
               </div>
             </div>
             <div>

@@ -46,7 +46,7 @@ export default function Rankings() {
         <div className="flex flex-wrap gap-2 mb-3">
           {sports.map((s) => (
             <button key={s.id} type="button" onClick={() => setSport(String(s.id))}
-              className={`chip ${String(s.id) === sport ? 'text-white' : 'bg-white border border-line text-ink-600'}`}
+              className={`${String(s.id) === sport ? 'chip text-white shadow-glow-sm' : 'chip-idle'}`}
               style={String(s.id) === sport ? { background: s.color } : undefined}>
               {s.name}
             </button>
@@ -90,7 +90,7 @@ export default function Rankings() {
               <ol className="divide-y divide-line">
                 {b.entries.map((e) => (
                   <li key={e.playerId}>
-                    <Link to={`/players/${e.playerId}`} className="flex items-center gap-3 px-4 py-2.5 hover:bg-canvas">
+                    <Link to={`/players/${e.playerId}`} className="flex items-center gap-3 px-4 py-2.5 hover:bg-white/[0.04]">
                       <span className={`font-display text-lg w-6 text-center ${e.rank === 1 ? 'text-gold' : 'text-ink-200'}`}>{e.rank}</span>
                       <Avatar player={{ photo_url: e.photoUrl, first_name: e.name.split(' ')[0], last_name: e.name.split(' ')[1] }} size={30} />
                       <span className="min-w-0 flex-1">

@@ -94,7 +94,7 @@ export default function Players() {
             <div className="flex rounded-lg border border-line overflow-hidden">
               {['table', 'cards'].map((v) => (
                 <button key={v} type="button" onClick={() => setView(v)}
-                  className={`px-3 py-2 text-xs font-semibold ${view === v ? 'bg-ink text-white' : 'bg-white text-ink-400'}`}>
+                  className={`px-3 py-2 text-xs font-semibold ${view === v ? 'chip-active' : 'bg-surface text-ink-400'}`}>
                   {titleCase(v)}
                 </button>
               ))}
@@ -196,7 +196,7 @@ export default function Players() {
                     <span className="flex flex-wrap gap-1.5 mt-2">
                       <StatusChip status={p.status} />
                       {p.sports.slice(0, 2).map((s) => (
-                        <span key={s.id} className="chip bg-canvas text-ink-600">{s.sport_name}</span>
+                        <span key={s.id} className="chip bg-white/5 text-ink-400 border border-line">{s.sport_name}</span>
                       ))}
                     </span>
                   </span>

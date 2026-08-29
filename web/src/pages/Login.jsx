@@ -42,26 +42,29 @@ export default function Login() {
   return (
     <div className="min-h-screen grid lg:grid-cols-2">
       {/* The thesis panel: one athlete, every sport, the whole journey. */}
-      <div className="bg-ink text-white px-8 sm:px-12 py-12 flex flex-col justify-between">
-        <div className="flex items-center gap-3">
-          <span className="h-10 w-10 rounded-lg bg-gold grid place-items-center font-display text-ink text-2xl leading-none">P</span>
+      <div className="relative overflow-hidden px-8 sm:px-12 py-12 flex flex-col justify-between border-b lg:border-b-0 lg:border-r border-line">
+        <span className="pointer-events-none absolute -top-24 -left-24 h-80 w-80 rounded-full bg-gold/20 blur-3xl" />
+        <span className="pointer-events-none absolute bottom-0 right-0 h-72 w-72 rounded-full bg-violet/20 blur-3xl" />
+
+        <div className="relative flex items-center gap-3">
+          <span className="h-11 w-11 rounded-xl bg-gold-grad grid place-items-center font-display text-[#1A1206] text-2xl leading-none shadow-glow">P</span>
           <div>
-            <p className="font-display text-2xl leading-none">PlayerArc</p>
-            <p className="text-[11px] uppercase tracking-[0.2em] text-ink-200">Karwan Sports Club</p>
+            <p className="font-display text-2xl leading-none bg-gold-grad bg-clip-text text-transparent">PlayerArc</p>
+            <p className="text-[11px] uppercase tracking-[0.2em] text-ink-400">Karwan Sports Club</p>
           </div>
         </div>
 
-        <div className="py-12">
-          <h1 className="font-display text-5xl sm:text-6xl leading-[0.95] max-w-md">
+        <div className="relative py-12">
+          <h1 className="font-display text-5xl sm:text-6xl leading-[0.95] max-w-md text-ink">
             One athlete.<br />
-            <span className="text-gold">Every sport.</span><br />
+            <span className="bg-gold-grad bg-clip-text text-transparent">Every sport.</span><br />
             The whole journey.
           </h1>
-          <p className="text-ink-200 mt-6 max-w-md text-sm leading-relaxed">
+          <p className="text-ink-400 mt-6 max-w-md text-sm leading-relaxed">
             Every player carries one permanent record — through cricket and football, from the U16 academy
             to the senior side, across every match, training session, assessment and award.
           </p>
-          <ol className="mt-8 flex flex-wrap gap-x-2 gap-y-2 text-[11px] uppercase tracking-wider text-ink-200">
+          <ol className="mt-8 flex flex-wrap gap-x-2 gap-y-2 text-[11px] uppercase tracking-wider text-ink-400">
             {['Player', 'Sports', 'Teams', 'Training', 'Matches', 'Performance', 'Assessment', 'Timeline'].map((s, i) => (
               <li key={s} className="flex items-center gap-2">
                 {i > 0 && <span className="text-gold">→</span>}
@@ -71,11 +74,11 @@ export default function Login() {
           </ol>
         </div>
 
-        <p className="text-[11px] text-ink-400">Athlete records &amp; performance management</p>
+        <p className="relative text-[11px] text-ink-200">Athlete records &amp; performance management</p>
       </div>
 
       {/* Sign in */}
-      <div className="flex items-center justify-center px-6 py-12 bg-canvas">
+      <div className="flex items-center justify-center px-6 py-12">
         <div className="w-full max-w-sm">
           <h2 className="font-display text-3xl">Sign in</h2>
           <p className="text-sm text-ink-400 mt-1">
@@ -83,7 +86,7 @@ export default function Login() {
           </p>
 
           {DEMO_MODE && (
-            <div className="mt-4 rounded-lg border border-gold/40 bg-gold-soft px-3.5 py-3 text-xs text-gold-dark">
+            <div className="mt-4 rounded-lg border border-gold/30 bg-gold/10 px-3.5 py-3 text-xs text-gold">
               <p className="font-semibold mb-1">This is a browser demonstration.</p>
               <p>
                 Everything runs in this page — the full interface, the seeded club, real career
@@ -116,9 +119,9 @@ export default function Login() {
                   <button
                     type="button"
                     onClick={() => { setEmail(addr); setPassword('Karwan@2026'); }}
-                    className="w-full text-left px-2 py-1.5 rounded hover:bg-canvas"
+                    className="w-full text-left px-2 py-1.5 rounded hover:bg-white/5 group transition-colors"
                   >
-                    <span className="font-mono text-[11px] text-ink block">{addr}</span>
+                    <span className="font-mono text-[11px] text-ink block group-hover:text-gold transition-colors">{addr}</span>
                     <span className="text-[11px] text-ink-400">{note}</span>
                   </button>
                 </li>

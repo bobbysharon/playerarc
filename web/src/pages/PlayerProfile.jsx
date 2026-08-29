@@ -57,9 +57,10 @@ export default function PlayerProfile() {
     <>
       {/* Jersey plate header — the identity block that anchors the record */}
       <div className="card overflow-hidden mb-5">
-        <div className="bg-ink text-white px-5 py-5 flex flex-wrap items-center gap-5">
+        <div className="relative overflow-hidden px-5 py-5 flex flex-wrap items-center gap-5 bg-surface-grad border-b border-line">
+          <span className="pointer-events-none absolute -top-16 -right-10 h-56 w-56 rounded-full bg-gold/15 blur-3xl" />
           <Avatar player={p} size={80} />
-          <div className="min-w-0 flex-1">
+          <div className="relative min-w-0 flex-1">
             <p className="font-mono text-xs text-gold tracking-wider">{p.athlete_id}</p>
             <h1 className="font-display text-4xl sm:text-5xl leading-none mt-1">{playerName(p)}</h1>
             <div className="flex flex-wrap items-center gap-2 mt-3">
@@ -69,13 +70,13 @@ export default function PlayerProfile() {
                   {sp.sport_name}{sp.is_primary ? ' · primary' : ''}
                 </span>
               ))}
-              {primarySport?.position && <span className="chip bg-ink-700 text-ink-200">{titleCase(primarySport.position)}</span>}
+              {primarySport?.position && <span className="chip bg-white/[0.07] text-ink-400 border border-line">{titleCase(primarySport.position)}</span>}
               {currentTeams.map((t) => (
-                <Link key={t.id} to={`/teams/${t.team_id}`} className="chip bg-ink-700 text-white hover:bg-ink-600">{t.team_name}</Link>
+                <Link key={t.id} to={`/teams/${t.team_id}`} className="chip bg-white/[0.07] text-ink border border-line hover:border-gold/50 hover:text-gold transition-colors">{t.team_name}</Link>
               ))}
             </div>
           </div>
-          <div className="flex gap-2">
+          <div className="relative flex gap-2">
             {can('reports.export') && (
               <button type="button" className="btn-ghost" onClick={() => api.download(`/export/player/${id}.pdf`, `${p.athlete_id}-career-report.pdf`)}>
                 Career report
@@ -116,7 +117,7 @@ export default function PlayerProfile() {
                   <div className="p-4">
                     <div className="grid grid-cols-2 sm:grid-cols-5 gap-px bg-line rounded-lg overflow-hidden border border-line mb-4">
                       {c.headline.map((h) => (
-                        <div key={h.key} className="bg-white px-3 py-2.5">
+                        <div key={h.key} className="bg-surface px-3 py-2.5">
                           <p className="text-[10px] uppercase tracking-wide text-ink-400 truncate">{h.label}</p>
                           <p className="stat-value text-xl mt-0.5">{h.display}</p>
                         </div>
@@ -136,7 +137,7 @@ export default function PlayerProfile() {
               <Section title="Recent activity">
                 <div className="divide-y divide-line">
                   {activity?.matches?.slice(0, 4).map((m) => (
-                    <Link key={m.id} to={`/matches/${m.id}`} className="flex items-center gap-3 px-4 py-3 hover:bg-canvas">
+                    <Link key={m.id} to={`/matches/${m.id}`} className="flex items-center gap-3 px-4 py-3 hover:bg-white/[0.04]">
                       <span className="h-8 w-1 rounded-full shrink-0" style={{ background: m.color }} />
                       <span className="min-w-0 flex-1">
                         <span className="text-sm font-medium block truncate">
@@ -149,7 +150,7 @@ export default function PlayerProfile() {
                     </Link>
                   ))}
                   {activity?.training?.slice(0, 3).map((t) => (
-                    <Link key={`t${t.id}`} to={`/training/${t.id}`} className="flex items-center gap-3 px-4 py-3 hover:bg-canvas">
+                    <Link key={`t${t.id}`} to={`/training/${t.id}`} className="flex items-center gap-3 px-4 py-3 hover:bg-white/[0.04]">
                       <span className="min-w-0 flex-1">
                         <span className="text-sm block truncate">{titleCase(t.training_type)} training · {t.team_name || t.sport_name}</span>
                         {t.coach_notes && <span className="text-xs text-ink-400 truncate block">{t.coach_notes}</span>}
@@ -248,7 +249,7 @@ export default function PlayerProfile() {
                 {development?.overallTrend?.length ? (
                   <TrendChart
                     data={development.overallTrend.map((d) => ({ date: d.date.slice(0, 7), score: d.value }))}
-                    series={[{ key: 'score', label: 'Overall score', color: '#C8952F' }]}
+                    series={[{ key: 'score', label: 'Overall score', color: '#F59E0B' }]}
                     domain={[0, 10]}
                     height={240}
                   />
@@ -293,7 +294,7 @@ export default function PlayerProfile() {
                       render: (r) => (
                         <span className="flex items-end gap-0.5 h-6">
                           {r.points.map((pt, i) => (
-                            <span key={i} className="w-1.5 bg-ink rounded-sm" style={{ height: `${Math.max(8, (pt.value / r.scaleMax) * 100)}%` }} title={`${pt.date}: ${pt.value}`} />
+                            <span key={i} className="w-1.5 rounded-sm bg-gradient-to-t from-gold-dark to-gold" style={{ height: `${Math.max(8, (pt.value / r.scaleMax) * 100)}%` }} title={`${pt.date}: ${pt.value}`} />
                           ))}
                         </span>
                       ),

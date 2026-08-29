@@ -31,9 +31,22 @@ export default function Sports() {
         <>
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 mb-5">
             {sports.map((s) => (
-              <button key={s.id} type="button" onClick={() => setSelected(s)} className="card p-4 text-left hover:shadow-lift transition-shadow">
-                <div className="flex items-center gap-2.5 mb-3">
-                  <span className="h-8 w-8 rounded-lg grid place-items-center font-display text-white text-lg" style={{ background: s.color }}>
+              <button
+                key={s.id}
+                type="button"
+                onClick={() => setSelected(s)}
+                className="card relative overflow-hidden p-4 text-left transition-all hover:shadow-lift hover:border-line-bright hover:-translate-y-0.5"
+                style={{ borderTop: `3px solid ${s.color}` }}
+              >
+                <span
+                  className="pointer-events-none absolute -top-10 -right-10 h-28 w-28 rounded-full blur-2xl opacity-40"
+                  style={{ background: s.color }}
+                />
+                <div className="relative flex items-center gap-2.5 mb-3">
+                  <span
+                    className="h-9 w-9 rounded-xl grid place-items-center font-display text-lg text-white"
+                    style={{ background: s.color, boxShadow: `0 0 18px ${s.color}66` }}
+                  >
                     {s.name[0]}
                   </span>
                   <span className="min-w-0">
@@ -41,7 +54,7 @@ export default function Sports() {
                     <span className="text-[11px] text-ink-400">{titleCase(s.category)} sport</span>
                   </span>
                 </div>
-                <div className="grid grid-cols-3 gap-2 text-center">
+                <div className="relative grid grid-cols-3 gap-2 text-center">
                   {[['Athletes', s.counts.players], ['Teams', s.counts.teams], ['Matches', s.counts.matches]].map(([l, v]) => (
                     <span key={l} className="block">
                       <span className="stat-value text-lg block">{v}</span>
@@ -49,7 +62,7 @@ export default function Sports() {
                     </span>
                   ))}
                 </div>
-                <p className="text-xs text-ink-400 mt-3">
+                <p className="relative text-xs text-ink-400 mt-3">
                   {(s.config?.matchStats || []).length} match statistics · {(s.config?.career || []).length} career calculations
                 </p>
               </button>

@@ -110,7 +110,7 @@ function PlayerReport({ data }) {
         <Section key={c.sport.id} title={`${c.sport.name} career`}>
           <div className="p-4 grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-px bg-line border border-line rounded-lg overflow-hidden">
             {c.career.entries.map((s) => (
-              <div key={s.key} className="bg-white px-3 py-2">
+              <div key={s.key} className="bg-surface px-3 py-2">
                 <p className="text-[10px] uppercase tracking-wide text-ink-400 truncate">{s.label}</p>
                 <p className="stat-value text-base">{s.display}</p>
               </div>

@@ -35,7 +35,7 @@ export default function Tournaments() {
         <div className="flex flex-wrap gap-2">
           {['', 'upcoming', 'ongoing', 'completed'].map((s) => (
             <button key={s || 'all'} type="button" onClick={() => setStatus(s)}
-              className={`chip ${status === s ? 'bg-ink text-white' : 'bg-white border border-line text-ink-600'}`}>
+              className={`${status === s ? 'chip-active' : 'chip-idle'}`}>
               {s ? titleCase(s) : 'All'}
             </button>
           ))}

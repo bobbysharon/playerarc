@@ -205,7 +205,7 @@ function AddToRoster({ open, onClose, team, onSaved }) {
           <ul className="border border-line rounded-lg max-h-56 overflow-y-auto scroll-thin divide-y divide-line">
             {results.map((p) => (
               <li key={p.id}>
-                <button type="button" onClick={() => { setSelected(p); setQ(playerName(p)); }} className="w-full text-left px-3 py-2 hover:bg-canvas flex items-center gap-2">
+                <button type="button" onClick={() => { setSelected(p); setQ(playerName(p)); }} className="w-full text-left px-3 py-2 hover:bg-white/[0.04] flex items-center gap-2">
                   <Avatar player={p} size={28} />
                   <span className="min-w-0">
                     <span className="text-sm block truncate">{playerName(p)}</span>

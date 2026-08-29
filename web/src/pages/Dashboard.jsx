@@ -1,5 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import {
+  Users, Shapes, Shield, Megaphone, Swords, Trophy, Dumbbell,
+  ClipboardCheck, Activity, Award, CalendarClock, Flame,
+} from 'lucide-react';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import {
@@ -38,26 +42,26 @@ export default function Dashboard() {
       />
 
       {data.demoDataPresent && (
-        <div className="mb-5 rounded-lg border border-gold/40 bg-gold-soft px-4 py-3 text-sm text-gold-dark flex flex-wrap items-center justify-between gap-3">
+        <div className="mb-5 rounded-xl border border-gold/30 bg-gold/10 px-4 py-3 text-sm text-gold flex flex-wrap items-center justify-between gap-3">
           <span>This workspace contains demonstration data. Real records are kept separate and are never removed by clearing it.</span>
           <Link to="/settings" className="font-semibold underline">Manage demo data</Link>
         </div>
       )}
 
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 mb-6">
-        <StatTile label="Athletes" value={t.athletes} hint={`${t.activeAthletes} active`} to="/players" />
-        <StatTile label="Sports" value={t.sports} to="/sports" />
-        <StatTile label="Teams" value={t.teams} to="/teams" />
-        <StatTile label="Coaches" value={t.coaches} to="/coaches" />
-        <StatTile label="Matches" value={t.matches} hint={`${t.completedMatches} completed`} to="/matches" />
-        <StatTile label="Tournaments" value={t.tournaments} to="/tournaments" />
+        <StatTile label="Athletes" value={t.athletes} hint={`${t.activeAthletes} active`} tone="gold" icon={Users} to="/players" />
+        <StatTile label="Sports" value={t.sports} tone="violet" icon={Shapes} to="/sports" />
+        <StatTile label="Teams" value={t.teams} tone="sky" icon={Shield} to="/teams" />
+        <StatTile label="Coaches" value={t.coaches} tone="pitch" icon={Megaphone} to="/coaches" />
+        <StatTile label="Matches" value={t.matches} hint={`${t.completedMatches} completed`} tone="alert" icon={Swords} to="/matches" />
+        <StatTile label="Tournaments" value={t.tournaments} tone="gold" icon={Trophy} to="/tournaments" />
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-        <StatTile label="Training sessions" value={t.trainingSessions} hint={`${data.attendanceRate}% attendance`} tone="pitch" to="/training" />
-        <StatTile label="Assessments" value={t.assessments} tone="pitch" to="/assessments" />
-        <StatTile label="Performance records" value={t.performances} tone="pitch" />
-        <StatTile label="Achievements" value={t.achievements} tone="gold" to="/achievements" />
+        <StatTile label="Training sessions" value={t.trainingSessions} hint={`${data.attendanceRate}% attendance`} tone="pitch" icon={Dumbbell} to="/training" />
+        <StatTile label="Assessments" value={t.assessments} tone="sky" icon={ClipboardCheck} to="/assessments" />
+        <StatTile label="Performance records" value={t.performances} tone="violet" icon={Activity} />
+        <StatTile label="Achievements" value={t.achievements} tone="gold" icon={Award} to="/achievements" />
       </div>
 
       <div className="grid lg:grid-cols-3 gap-5">
@@ -71,9 +75,14 @@ export default function Dashboard() {
             />
             <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-2 mt-4">
               {data.bySport.map((s) => (
-                <Link key={s.id} to={`/players?sport=${s.id}`} className="flex items-center justify-between gap-2 rounded-lg border border-line px-3 py-2 hover:bg-canvas">
+                <Link
+                  key={s.id}
+                  to={`/players?sport=${s.id}`}
+                  className="flex items-center justify-between gap-2 rounded-lg border border-line px-3 py-2 transition-all hover:border-line-bright hover:bg-white/[0.04]"
+                  style={{ borderLeft: `3px solid ${s.color}` }}
+                >
                   <span className="flex items-center gap-2 min-w-0">
-                    <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ background: s.color }} />
+                    <span className="h-2.5 w-2.5 rounded-full shrink-0 ring-2" style={{ background: s.color, boxShadow: `0 0 10px ${s.color}` }} />
                     <span className="text-sm truncate">{s.name}</span>
                   </span>
                   <span className="font-mono text-xs text-ink-400 shrink-0">{s.players}p · {s.teams}t · {s.matches}m</span>
@@ -88,7 +97,7 @@ export default function Dashboard() {
             <div className="p-4">
               <TrendChart
                 data={data.registrationTrend.map((r) => ({ date: r.month.slice(2), count: r.count }))}
-                series={[{ key: 'count', label: 'Registrations', color: '#C8952F' }]}
+                series={[{ key: 'count', label: 'Registrations', color: '#F59E0B' }]}
                 height={150}
               />
             </div>
@@ -115,7 +124,7 @@ export default function Dashboard() {
               <ul className="divide-y divide-line">
                 {data.upcomingMatches.map((m) => (
                   <li key={m.id}>
-                    <Link to={`/matches/${m.id}`} className="flex items-center gap-3 px-4 py-3 hover:bg-canvas">
+                    <Link to={`/matches/${m.id}`} className="flex items-center gap-3 px-4 py-3 hover:bg-white/[0.04]">
                       <span className="h-8 w-1 rounded-full shrink-0" style={{ background: m.color }} />
                       <span className="min-w-0 flex-1">
                         <span className="text-sm font-medium block truncate">
@@ -138,7 +147,7 @@ export default function Dashboard() {
               <ul className="divide-y divide-line">
                 {data.recentMatches.map((m) => (
                   <li key={m.id}>
-                    <Link to={`/matches/${m.id}`} className="flex items-center gap-3 px-4 py-3 hover:bg-canvas">
+                    <Link to={`/matches/${m.id}`} className="flex items-center gap-3 px-4 py-3 hover:bg-white/[0.04]">
                       <Chip tone={m.result}>{titleCase(m.result || '—')}</Chip>
                       <span className="min-w-0 flex-1">
                         <span className="text-sm font-medium block truncate">
@@ -163,7 +172,7 @@ export default function Dashboard() {
               <ul className="divide-y divide-line">
                 {data.recentAchievements.map((a) => (
                   <li key={a.id}>
-                    <Link to={`/players/${a.player_id}`} className="flex items-center gap-3 px-4 py-3 hover:bg-canvas">
+                    <Link to={`/players/${a.player_id}`} className="flex items-center gap-3 px-4 py-3 hover:bg-white/[0.04]">
                       <Avatar player={a} size={36} />
                       <span className="min-w-0 flex-1">
                         <span className="text-sm font-medium block truncate">{a.title}</span>
@@ -181,7 +190,7 @@ export default function Dashboard() {
           <ul className="divide-y divide-line">
             {data.recentRegistrations.map((p) => (
               <li key={p.id}>
-                <Link to={`/players/${p.id}`} className="flex items-center gap-3 px-4 py-3 hover:bg-canvas">
+                <Link to={`/players/${p.id}`} className="flex items-center gap-3 px-4 py-3 hover:bg-white/[0.04]">
                   <Avatar player={p} size={36} />
                   <span className="min-w-0 flex-1">
                     <span className="text-sm font-medium block truncate">{playerName(p)}</span>
@@ -200,7 +209,7 @@ export default function Dashboard() {
           <ul className="divide-y divide-line">
             {data.upcomingTraining.map((s) => (
               <li key={s.id}>
-                <Link to={`/training/${s.id}`} className="flex flex-wrap items-center gap-3 px-4 py-3 hover:bg-canvas">
+                <Link to={`/training/${s.id}`} className="flex flex-wrap items-center gap-3 px-4 py-3 hover:bg-white/[0.04]">
                   <span className="min-w-0 flex-1">
                     <span className="text-sm font-medium block truncate">{s.team_name || s.sport_name} — {titleCase(s.training_type)}</span>
                     <span className="text-xs text-ink-400">{s.location} · {s.coach_name || 'Coach TBC'}</span>

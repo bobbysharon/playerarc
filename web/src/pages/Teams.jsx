@@ -36,10 +36,10 @@ export default function Teams() {
         actions={can('teams.write') ? <button type="button" className="btn-gold" onClick={() => setCreating(true)}>Create team</button> : null}
       >
         <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={() => setSport('')} className={`chip ${sport === '' ? 'bg-ink text-white' : 'bg-white border border-line text-ink-600'}`}>All sports</button>
+          <button type="button" onClick={() => setSport('')} className={`${sport === '' ? 'chip-active' : 'chip-idle'}`}>All sports</button>
           {sports.map((s) => (
             <button key={s.id} type="button" onClick={() => setSport(String(s.id))}
-              className={`chip ${String(s.id) === sport ? 'text-white' : 'bg-white border border-line text-ink-600'}`}
+              className={`${String(s.id) === sport ? 'chip text-white shadow-glow-sm' : 'chip-idle'}`}
               style={String(s.id) === sport ? { background: s.color } : undefined}>
               {s.name}
             </button>

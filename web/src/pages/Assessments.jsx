@@ -156,7 +156,7 @@ function AssessmentForm({ open, onClose, sports, coaches, onSaved }) {
           <ul className="border border-line rounded-lg max-h-44 overflow-y-auto scroll-thin divide-y divide-line">
             {results.map((p) => (
               <li key={p.id}>
-                <button type="button" className="w-full text-left px-3 py-2 hover:bg-canvas flex items-center gap-2"
+                <button type="button" className="w-full text-left px-3 py-2 hover:bg-white/[0.04] flex items-center gap-2"
                   onClick={() => {
                     setPlayer(p); setQ(playerName(p));
                     const primary = p.sports.find((s) => s.is_primary) || p.sports[0];

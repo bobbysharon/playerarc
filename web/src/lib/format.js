@@ -1,27 +1,38 @@
 export const STATUS_STYLES = {
-  active: 'bg-pitch/10 text-pitch',
-  inactive: 'bg-ink-200/20 text-ink-400',
-  injured: 'bg-alert/10 text-alert',
-  on_loan: 'bg-gold-soft text-gold-dark',
-  suspended: 'bg-alert/10 text-alert',
-  retired: 'bg-ink-200/20 text-ink-400',
-  alumni: 'bg-ink-200/20 text-ink-600',
-  trial: 'bg-gold-soft text-gold-dark',
-  scheduled: 'bg-ink-200/20 text-ink-600',
-  live: 'bg-alert/10 text-alert',
-  completed: 'bg-pitch/10 text-pitch',
-  upcoming: 'bg-gold-soft text-gold-dark',
-  ongoing: 'bg-pitch/10 text-pitch',
-  cancelled: 'bg-ink-200/20 text-ink-400',
-  abandoned: 'bg-ink-200/20 text-ink-400',
-  win: 'bg-pitch/10 text-pitch',
-  loss: 'bg-alert/10 text-alert',
-  draw: 'bg-ink-200/20 text-ink-600',
-  tie: 'bg-ink-200/20 text-ink-600',
-  present: 'bg-pitch/10 text-pitch',
-  absent: 'bg-alert/10 text-alert',
-  late: 'bg-gold-soft text-gold-dark',
-  excused: 'bg-ink-200/20 text-ink-600',
+  // Positive / live
+  active: 'bg-pitch/15 text-pitch border border-pitch/30',
+  present: 'bg-pitch/15 text-pitch border border-pitch/30',
+  completed: 'bg-pitch/15 text-pitch border border-pitch/30',
+  ongoing: 'bg-pitch/15 text-pitch border border-pitch/30',
+  win: 'bg-pitch/15 text-pitch border border-pitch/30',
+
+  // Attention / pending
+  trial: 'bg-gold/15 text-gold border border-gold/30',
+  on_loan: 'bg-gold/15 text-gold border border-gold/30',
+  upcoming: 'bg-gold/15 text-gold border border-gold/30',
+  late: 'bg-gold/15 text-gold border border-gold/30',
+
+  // Negative
+  injured: 'bg-alert/15 text-alert border border-alert/30',
+  suspended: 'bg-alert/15 text-alert border border-alert/30',
+  absent: 'bg-alert/15 text-alert border border-alert/30',
+  loss: 'bg-alert/15 text-alert border border-alert/30',
+
+  // Live
+  live: 'bg-fuchsia/15 text-fuchsia border border-fuchsia/30',
+
+  // Neutral / informational
+  scheduled: 'bg-sky/15 text-sky border border-sky/30',
+  excused: 'bg-sky/15 text-sky border border-sky/30',
+  draw: 'bg-violet/15 text-violet border border-violet/30',
+  tie: 'bg-violet/15 text-violet border border-violet/30',
+  alumni: 'bg-violet/15 text-violet border border-violet/30',
+
+  // Dormant
+  inactive: 'bg-white/5 text-ink-400 border border-line',
+  retired: 'bg-white/5 text-ink-400 border border-line',
+  cancelled: 'bg-white/5 text-ink-400 border border-line',
+  abandoned: 'bg-white/5 text-ink-400 border border-line',
 };
 
 export const titleCase = (s) =>

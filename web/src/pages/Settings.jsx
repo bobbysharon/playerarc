@@ -165,7 +165,7 @@ function UserForm({ open, onClose, roles, sports, teams, onSaved }) {
             <div className="flex flex-wrap gap-1.5">
               {sports.map((s) => (
                 <button key={s.id} type="button" onClick={() => toggle('sportIds', s.id)}
-                  className={`chip ${form.sportIds.includes(s.id) ? 'bg-ink text-white' : 'bg-white border border-line text-ink-600'}`}>
+                  className={`${form.sportIds.includes(s.id) ? 'chip-active' : 'chip-idle'}`}>
                   {s.name}
                 </button>
               ))}
@@ -177,7 +177,7 @@ function UserForm({ open, onClose, roles, sports, teams, onSaved }) {
             <div className="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto scroll-thin">
               {teams.map((t) => (
                 <button key={t.id} type="button" onClick={() => toggle('teamIds', t.id)}
-                  className={`chip ${form.teamIds.includes(t.id) ? 'bg-ink text-white' : 'bg-white border border-line text-ink-600'}`}>
+                  className={`${form.teamIds.includes(t.id) ? 'chip-active' : 'chip-idle'}`}>
                   {t.name}
                 </button>
               ))}
@@ -288,7 +288,7 @@ function DemoData() {
         {confirming ? (
           <div className="flex gap-2">
             <button type="button" className="btn-ghost" onClick={() => setConfirming(false)}>Cancel</button>
-            <button type="button" className="btn bg-alert text-white hover:opacity-90" onClick={clear} disabled={busy}>
+            <button type="button" className="btn-danger" onClick={clear} disabled={busy}>
               {busy ? 'Clearing…' : 'Yes, clear demonstration data'}
             </button>
           </div>

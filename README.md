@@ -200,7 +200,15 @@ Team memberships get an end date. Status changes append to a status history. Pos
 jersey changes append to an attribute history. Assessments are never edited in place. This is what
 makes the platform a longitudinal record rather than a snapshot of the current squad.
 
-**4. The demo shares the server's logic rather than copying it.**
+**4. The interface is dark, and colour carries meaning.**
+Near-black canvas, slate panels, and an amber-to-orange gradient on everything primary — the same
+system as Aura King. Colour is not decoration: each sport carries its own colour from the database
+through cards, chips, charts and timeline entries, and status pills use a fixed accent map (emerald
+for active and won, rose for injured and lost, amber for pending, sky for scheduled, violet for
+drawn). Every text colour was checked against every surface for WCAG AA contrast; two were adjusted
+because they came in under 4.5:1.
+
+**5. The demo shares the server's logic rather than copying it.**
 A hand-written second implementation would drift the first time a rating formula changed.
 `scripts/build-demo-engine.mjs` converts `stats-engine.js`, `formula.js` and `permissions.js` from
 CommonJS to ES modules and writes them into the demo, so the browser computes career records and

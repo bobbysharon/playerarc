@@ -35,9 +35,9 @@ export default function Achievements() {
         actions={can('achievements.write') ? <button type="button" className="btn-gold" onClick={() => setCreating(true)}>Record award</button> : null}
       >
         <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={() => setCategory('')} className={`chip ${category === '' ? 'bg-ink text-white' : 'bg-white border border-line text-ink-600'}`}>All</button>
+          <button type="button" onClick={() => setCategory('')} className={`${category === '' ? 'chip-active' : 'chip-idle'}`}>All</button>
           {CATEGORIES.map((c) => (
-            <button key={c} type="button" onClick={() => setCategory(c)} className={`chip ${category === c ? 'bg-ink text-white' : 'bg-white border border-line text-ink-600'}`}>
+            <button key={c} type="button" onClick={() => setCategory(c)} className={`${category === c ? 'chip-active' : 'chip-idle'}`}>
               {titleCase(c)}
             </button>
           ))}
@@ -114,7 +114,7 @@ function AwardForm({ open, onClose, sports, tournaments, onSaved }) {
           <ul className="border border-line rounded-lg max-h-40 overflow-y-auto scroll-thin divide-y divide-line">
             {results.map((p) => (
               <li key={p.id}>
-                <button type="button" className="w-full text-left px-3 py-2 hover:bg-canvas text-sm" onClick={() => { setPlayer(p); setQ(playerName(p)); }}>
+                <button type="button" className="w-full text-left px-3 py-2 hover:bg-white/[0.04] text-sm" onClick={() => { setPlayer(p); setQ(playerName(p)); }}>
                   {playerName(p)} <span className="font-mono text-[11px] text-ink-400 ml-2">{p.athlete_id}</span>
                 </button>
               </li>
