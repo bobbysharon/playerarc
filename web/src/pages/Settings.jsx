@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import { DEMO_MODE } from '../lib/api';
 import { PageHeader, Section, Spinner, ErrorNote, DataTable, Tabs, Modal, Field, Chip } from '../components/ui';
 import { formatDateTime, titleCase } from '../lib/format';
 
@@ -62,6 +63,11 @@ function Account({ user }) {
         </dl>
       </Section>
       <Section title="Change password">
+        {DEMO_MODE && (
+          <p className="px-4 pt-4 text-sm text-ink-400">
+            Passwords are stored by the server, which this browser demonstration does not have.
+          </p>
+        )}
         <form onSubmit={submit} className="p-4 space-y-3">
           <Field label="Current password"><input className="input" type="password" required value={form.currentPassword} onChange={(e) => setForm({ ...form, currentPassword: e.target.value })} /></Field>
           <Field label="New password" hint="At least 8 characters"><input className="input" type="password" required value={form.newPassword} onChange={(e) => setForm({ ...form, newPassword: e.target.value })} /></Field>

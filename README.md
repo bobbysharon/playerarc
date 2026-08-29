@@ -32,9 +32,36 @@ complete sporting journey from one place?*
 
 ---
 
-## Running it
+## Three ways to run it
 
-Requires **Node.js 20 or later**. No database server to install — SQLite is embedded.
+### 1. Live demo — GitHub Pages
+
+The repository publishes a **browser-only demonstration** to GitHub Pages. It contains the full
+interface and the seeded club, and it runs entirely in the page — no server, no database.
+
+One-time setup, then every push to `main` deploys automatically:
+
+1. Push this repository to GitHub
+2. Open **Settings → Pages** and set **Source** to **GitHub Actions**
+3. Push to `main`; the workflow in `.github/workflows/deploy-demo.yml` builds and publishes
+
+Your site appears at `https://<username>.github.io/<repository-name>/`. The base path is taken from
+the repository name automatically.
+
+**What is real in the demo:** every screen, the seeded club, career statistics computed by the same
+engine the server uses, per-sport ratings, leaderboards, role permissions and field redaction.
+Changes you make persist until you reload the page.
+
+**What is not:** sign-in is not secured — the demo compares a shared password rather than a hash,
+because password hashes must never ship to a browser. File uploads, Excel and PDF reports need the
+server. Use the demo to show people the platform, not to run the club.
+
+> Building it locally: `npm run build:demo`, then `npm run preview:demo`.
+> If your repository has a different name, set `VITE_BASE` in `web/.env.demo`.
+
+### 2. Locally — the real platform
+
+Requires **Node.js 20 or later**. No database server to install; SQLite is embedded.
 
 ```bash
 git clone <your-repo-url> playerarc
@@ -47,6 +74,25 @@ npm run dev                   # API on :4000, web app on :5173
 ```
 
 Open **http://localhost:5173** and sign in.
+
+### 3. Hosted — the real platform on a live URL
+
+GitHub Pages cannot host the real application: it serves static files only, and PlayerArc needs a
+Node process and a database. Any host that runs Node will do.
+
+**Render** — push to GitHub, then New → Blueprint and point it at the repository. `render.yaml`
+describes the service, generates a `JWT_SECRET`, and attaches a disk so the database and uploads
+survive redeploys. Set `CORS_ORIGIN` to your actual URL once it is assigned.
+
+**Docker** — anywhere that runs containers:
+
+```bash
+docker build -t playerarc .
+docker run -p 4000:4000 -e JWT_SECRET=<long-random-string> \
+  -v playerarc-data:/app/server/data playerarc
+```
+
+Railway, Fly.io and a plain VPS all work the same way: build, then `npm start`.
 
 ### Demonstration accounts
 
@@ -76,7 +122,8 @@ npm start            # the API serves the built app on :4000
 
 ```bash
 npm start                       # in one terminal
-node scripts/smoke-test.mjs     # in another — 44 checks across every module
+node scripts/smoke-test.mjs     # in another — 44 checks against the live API
+node scripts/demo-test.mjs      # 45 checks against the browser demo
 ```
 
 ---
@@ -102,9 +149,19 @@ playerarc/
 │   └── src/
 │       ├── components/ui.jsx   Shared interface: tables, charts, career spine
 │       ├── lib/                API client, auth context, formatting
-│       └── pages/              20 screens
+│       ├── pages/              20 screens
+│       └── demo/               Browser-only backend for the static build
+│           ├── api.js          Answers the same calls the server does
+│           ├── dataset.json    Exported from the seeded database
+│           └── engine/         Generated from the server's shared modules
 ├── docs/                       Architecture, data model, permissions, API
-└── scripts/smoke-test.mjs      End-to-end verification
+├── .github/workflows/          GitHub Pages deployment
+├── Dockerfile · render.yaml    Hosting the real platform
+└── scripts/
+    ├── smoke-test.mjs          End-to-end API verification
+    ├── demo-test.mjs           Browser demo verification
+    ├── export-demo-data.mjs    Database → demo dataset
+    └── build-demo-engine.mjs   Server modules → demo engine
 ```
 
 Full detail is in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md),
@@ -132,6 +189,13 @@ performances each time. Nothing has to be recalculated or repaired. See
 Team memberships get an end date. Status changes append to a status history. Position, level and
 jersey changes append to an attribute history. Assessments are never edited in place. This is what
 makes the platform a longitudinal record rather than a snapshot of the current squad.
+
+**4. The demo shares the server's logic rather than copying it.**
+A hand-written second implementation would drift the first time a rating formula changed.
+`scripts/build-demo-engine.mjs` converts `stats-engine.js`, `formula.js` and `permissions.js` from
+CommonJS to ES modules and writes them into the demo, so the browser computes career records and
+applies permissions with the same code the server runs. Regenerate both with `npm run demo:data`
+after changing a sport configuration or the seed.
 
 ---
 
@@ -165,6 +229,7 @@ The build follows the phased approach in the requirements document. All five pha
 | 30 — Future features | `match_events` table exists for ball-by-ball; portal roles and public visibility already modelled |
 | 34 — Data integrity | Unique indexes, cross-field statistic validation, scale checks |
 | 35 — Demo data | `is_demo` flag on every seeded record; clearable from Settings |
+| Deployment | GitHub Pages demo, Docker image, Render blueprint |
 
 ### Deliberately left for later
 

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
+import { DEMO_MODE } from '../lib/api';
 import { ErrorNote, Field } from '../components/ui';
 
 const DEMO_ACCOUNTS = [
@@ -77,7 +78,21 @@ export default function Login() {
       <div className="flex items-center justify-center px-6 py-12 bg-canvas">
         <div className="w-full max-w-sm">
           <h2 className="font-display text-3xl">Sign in</h2>
-          <p className="text-sm text-ink-400 mt-1">Use your Karwan Sports Club account.</p>
+          <p className="text-sm text-ink-400 mt-1">
+            {DEMO_MODE ? 'Pick any account below to explore the platform.' : 'Use your Karwan Sports Club account.'}
+          </p>
+
+          {DEMO_MODE && (
+            <div className="mt-4 rounded-lg border border-gold/40 bg-gold-soft px-3.5 py-3 text-xs text-gold-dark">
+              <p className="font-semibold mb-1">This is a browser demonstration.</p>
+              <p>
+                Everything runs in this page — the full interface, the seeded club, real career
+                statistics and role permissions. Changes you make are kept until you reload, and
+                sign-in is not secured. Run PlayerArc locally for the real server, database and
+                Excel and PDF reports.
+              </p>
+            </div>
+          )}
 
           <form onSubmit={submit} className="mt-6 space-y-4">
             <Field label="Email">

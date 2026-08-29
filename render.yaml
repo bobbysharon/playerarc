@@ -1,0 +1,36 @@
+# Deploys the full platform to Render (https://render.com).
+#
+# 1. Push this repository to GitHub
+# 2. In Render: New → Blueprint, and point it at the repository
+# 3. Render reads this file and creates the service
+#
+# JWT_SECRET is generated for you. Change the seeded passwords after the first
+# sign-in, and set SEED_DEMO to false once you start entering real records.
+
+services:
+  - type: web
+    name: playerarc
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build && npm run db:reset
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 4000
+      - key: JWT_SECRET
+        generateValue: true
+      - key: CORS_ORIGIN
+        value: https://playerarc.onrender.com
+      - key: SEED_DEMO
+        value: "true"
+      - key: DATABASE_FILE
+        value: /var/data/playerarc.db
+      - key: UPLOAD_DIR
+        value: /var/data/uploads
+    disk:
+      name: playerarc-data
+      mountPath: /var/data
+      sizeGB: 1

@@ -1,11 +1,15 @@
 node_modules/
-dist/
+web/dist/
 build/
 .env
 *.local
-data/*.db
-data/*.db-*
-uploads/
+server/data/*.db
+server/data/*.db-*
+server/uploads/*
+!server/uploads/.gitkeep
 coverage/
 .DS_Store
 *.log
+
+# The demo dataset and generated engine ARE committed — the GitHub Pages
+# build needs them and has no database to generate them from.
