@@ -35,7 +35,7 @@ carries timestamps, and no fact about an athlete is duplicated across tables.
                   │
                   └──► matches ──┬──► match_players        (playing XI / lineup)
                                  ├──► match_performances   (sport-specific stats)
-                                 └──► match_events         (ball-by-ball, future)
+                                 └──► match_events ◄── match_periods   (ball-by-ball)
 
   assessment_criteria ──► assessment_scores ◄── assessments ──► players
 ```
@@ -67,6 +67,19 @@ One row per athlete per match, with `stats_json` validated against the sport's `
 it is written. `UNIQUE (match_id, player_id)` makes saving a scorecard idempotent — the route
 upserts, so re-saving a corrected card updates rather than duplicates. Indexed on
 `(player_id, sport_id)`, the path every career page takes.
+
+## The event layer
+
+| Table | Records |
+| --- | --- |
+| `match_periods` | An innings, half, quarter or set. `team_id` set means the athlete records for that period belong to Karwan; `team_label` names the opposition when they do not |
+| `match_events` | One delivery, shot, goal, rally or card. Actors in three roles, coordinates on a 0–100 grid so any pitch or court maps to the same space, an `outcome` headline and sport-specific detail in `payload_json` |
+
+`match_events.is_void` marks a correction: the last event can be deleted outright, but an earlier one
+is voided instead so the record of the change survives. Voided events are excluded from every
+derived figure.
+
+Nothing derived is stored in either table. See ARCHITECTURE.md.
 
 ## Historical tables
 

@@ -13,6 +13,8 @@ import Tournaments from './pages/Tournaments';
 import TournamentDetail from './pages/TournamentDetail';
 import Matches from './pages/Matches';
 import MatchDetail from './pages/MatchDetail';
+import MatchAnalysis from './pages/MatchAnalysis';
+import MatchScoring from './pages/MatchScoring';
 import Training from './pages/Training';
 import TrainingDetail from './pages/TrainingDetail';
 import Assessments from './pages/Assessments';
@@ -49,6 +51,8 @@ export default function App() {
       <Route path="/tournaments/:id" element={<Protected><TournamentDetail /></Protected>} />
       <Route path="/matches" element={<Protected><Matches /></Protected>} />
       <Route path="/matches/:id" element={<Protected><MatchDetail /></Protected>} />
+      <Route path="/matches/:id/analysis" element={<Protected><MatchAnalysis /></Protected>} />
+      <Route path="/matches/:id/scoring" element={<Protected><MatchScoring /></Protected>} />
       <Route path="/training" element={<Protected><Training /></Protected>} />
       <Route path="/training/:id" element={<Protected><TrainingDetail /></Protected>} />
       <Route path="/assessments" element={<Protected><Assessments /></Protected>} />

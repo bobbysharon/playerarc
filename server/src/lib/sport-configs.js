@@ -550,6 +550,8 @@ const VOLLEYBALL = {
   ],
 };
 
+const EVENTS = require('./event-configs');
+
 const SPORTS = [
   { code: 'cricket', name: 'Cricket', icon: 'cricket', sort_order: 10, config: CRICKET },
   { code: 'football', name: 'Football', icon: 'football', sort_order: 20, config: FOOTBALL },
@@ -559,5 +561,11 @@ const SPORTS = [
   { code: 'futsal', name: 'Futsal', icon: 'futsal', sort_order: 60, config: FUTSAL },
   { code: 'volleyball', name: 'Volleyball', icon: 'volleyball', sort_order: 70, config: VOLLEYBALL },
 ];
+
+// The ball-by-ball layer is defined alongside the statistics layer, so a sport
+// remains one self-contained block of configuration.
+for (const sport of SPORTS) {
+  sport.config.events = EVENTS[sport.code] || null;
+}
 
 module.exports = { SPORTS, CRICKET, FOOTBALL, BASKETBALL, BADMINTON, TABLE_TENNIS, FUTSAL, VOLLEYBALL };

@@ -22,6 +22,8 @@ complete sporting journey from one place?*
 | **Teams** | Squads by sport, age group and season, with roster history that is closed rather than deleted |
 | **Tournaments** | Competitions, entered teams, fixtures, results, awards and per-tournament leaderboards |
 | **Matches** | Fixtures, playing XI / lineup, and per-player statistics entered against the sport's own schema |
+| **Ball-by-ball capture** | Every delivery, shot, goal, rally and card, with actors, coordinates and full sport-specific detail |
+| **Match analysis** | Scorecards, run rates, partnerships, phases, wagon wheels, pitch maps, shot maps, momentum, head-to-head and commentary — all derived from the events |
 | **Training** | Sessions, exercises, attendance, per-athlete performance and effort scores, coach notes |
 | **Assessments** | Configurable criteria across physical, technical, tactical and behavioural categories — append-only, so development is visible over years |
 | **Achievements** | Awards, selections and milestones, flowing onto the athlete's timeline |
@@ -126,8 +128,8 @@ npm start            # the API serves the built app on :4000
 
 ```bash
 npm start                       # in one terminal
-node scripts/smoke-test.mjs     # in another — 44 checks against the live API
-node scripts/demo-test.mjs      # 45 checks against the browser demo
+node scripts/smoke-test.mjs     # in another — 78 checks against the live API
+node scripts/demo-test.mjs      # 68 checks against the browser demo
 ```
 
 `package-lock.json` is committed, so every environment installs the same dependency tree.
@@ -152,6 +154,8 @@ playerarc/
 │       ├── db/seed.js          Sport definitions, criteria, and the demo club
 │       ├── lib/
 │       │   ├── sport-configs.js   Every sport defined as data, not code
+│       │   ├── event-configs.js   Ball-by-ball event types and derivation rules
+│       │   ├── match-analysis.js  Scorecards and analysis derived from events
 │       │   ├── stats-engine.js    Career aggregation, ratings, validation
 │       │   ├── formula.js         Safe evaluator for configured formulas
 │       │   ├── permissions.js     Role matrix and field redaction
@@ -204,7 +208,17 @@ Team memberships get an end date. Status changes append to a status history. Pos
 jersey changes append to an attribute history. Assessments are never edited in place. This is what
 makes the platform a longitudinal record rather than a snapshot of the current squad.
 
-**4. The interface is dark, and colour carries meaning.**
+**4. A match is recorded as events, and everything else is read off them.**
+A scorer records one delivery — runs, extras, shot, length, line, delivery type, speed, whether the
+batter was in control, who took the catch, where the ball went. From that single stream the platform
+derives the batting and bowling cards, run rate, partnerships, fall of wickets, phase splits, wagon
+wheel, pitch map, dot-ball and control percentages, head-to-head matchups and the commentary feed —
+and then the athlete's career record, rating and league position, because the scorecard itself is
+derived too. Nobody types a scorecard for a match that was scored ball by ball, and correcting one
+delivery corrects every figure built on it. Football, basketball and the racket sports work the same
+way with their own event types, defined as configuration rather than code.
+
+**5. The interface is dark, and colour carries meaning.**
 Near-black canvas, slate panels, and an amber-to-orange gradient on everything primary — the same
 system as Aura King. Colour is not decoration: each sport carries its own colour from the database
 through cards, chips, charts and timeline entries, and status pills use a fixed accent map (emerald
@@ -212,7 +226,7 @@ for active and won, rose for injured and lost, amber for pending, sky for schedu
 drawn). Every text colour was checked against every surface for WCAG AA contrast; two were adjusted
 because they came in under 4.5:1.
 
-**5. The demo shares the server's logic rather than copying it.**
+**6. The demo shares the server's logic rather than copying it.**
 A hand-written second implementation would drift the first time a rating formula changed.
 `scripts/build-demo-engine.mjs` converts `stats-engine.js`, `formula.js` and `permissions.js` from
 CommonJS to ES modules and writes them into the demo, so the browser computes career records and
@@ -249,7 +263,10 @@ The build follows the phased approach in the requirements document. All five pha
 | 25 — Admin dashboard | `pages/Dashboard.jsx` |
 | 27–28 — Relational model, historical records | `db/schema.sql` |
 | 29 — Scalability | Indexed foreign keys, paginated lists, Postgres-portable schema |
-| 30 — Future features | `match_events` table exists for ball-by-ball; portal roles and public visibility already modelled |
+| Ball-by-ball capture | `match_periods` + `match_events`, `lib/event-configs.js`, `pages/MatchScoring.jsx` |
+| Full match analysis | `lib/match-analysis.js`, `pages/MatchAnalysis.jsx` |
+| Statistics derived from events | `derive` rules per sport; `refreshPerformances()` in `routes/match-events.js` |
+| 30 — Future features | Live scoring now built; portal roles and public visibility already modelled |
 | 34 — Data integrity | Unique indexes, cross-field statistic validation, scale checks |
 | 35 — Demo data | `is_demo` flag on every seeded record; clearable from Settings |
 | Deployment | GitHub Pages demo, Docker image, Render blueprint |
@@ -261,6 +278,28 @@ Consistent with requirement 30, these are modelled but not built out: ball-by-ba
 video analysis, wearable integrations and notifications. None of them require schema restructuring.
 
 ---
+
+## Recording a match in full
+
+Open a match and choose **Score ball by ball**. The console renders itself from the sport's event
+configuration, so what you see depends on the sport:
+
+| Sport | A period is | You record |
+| --- | --- | --- |
+| Cricket | an innings | every delivery: runs, extras, shot, length, line, delivery type, speed, control, edge, appeal, dropped catch, wicket and dismissal, plus where the ball went |
+| Football / futsal | a half | shots with body part and situation, key passes, tackles and interceptions, saves, fouls, cards, substitutions, all with pitch coordinates |
+| Basketball | a quarter | shots by type and value with court coordinates, rebounds, assists, blocks, steals, turnovers, fouls |
+| Badminton / table tennis | a set | every rally: who won it, how, rally length, whether they were serving, where it landed |
+| Volleyball | a set | every rally: kill, block, ace or error, contacts in the rally |
+
+Set the striker, bowler and fielder once and they stay until you change them. Tap an outcome to
+record a delivery, or open **Full detail** for everything the sport declares. Cricket works out its
+own over and ball number, and knows that a wide is re-bowled. **Undo last** removes a delivery
+mid-over; an older one is voided rather than deleted, so the correction stays on the record.
+
+Then open **Analysis**. Nothing there is stored — it is all computed from the events on each read,
+which is why fixing one delivery fixes the scorecard, the run rate, the partnership, the bowler's
+economy, the athlete's career average and their position on the leaderboard at once.
 
 ## A note on passwords
 

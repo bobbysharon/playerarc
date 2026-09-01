@@ -221,41 +221,66 @@ async function main() {
   const players = [];
   const usedNames = new Set();
 
+  // Squads are allocated first, then athletes are generated to fill them, so
+  // every team ends up with a viable roster and an age range that matches its
+  // age group. Building it the other way round — generating athletes and
+  // sorting them by age afterwards — leaves the narrow bands almost empty.
+  const SQUAD_PLAN = [
+    { team: 'Karwan Cricket Senior XI', sport: 'cricket', size: 13, ageRange: [19, 33] },
+    { team: 'Karwan Cricket U18', sport: 'cricket', size: 12, ageRange: [16, 17] },
+    { team: 'Karwan Cricket U16', sport: 'cricket', size: 11, ageRange: [14, 15] },
+    { team: 'Karwan FC Senior', sport: 'football', size: 14, ageRange: [19, 32] },
+    { team: 'Karwan FC U18', sport: 'football', size: 13, ageRange: [16, 17] },
+    { team: 'Karwan FC U16', sport: 'football', size: 12, ageRange: [14, 15] },
+    { team: 'Karwan Hoops Senior', sport: 'basketball', size: 9, ageRange: [19, 30] },
+    { team: 'Karwan Hoops U18', sport: 'basketball', size: 8, ageRange: [16, 17] },
+    { team: 'Karwan Badminton Squad', sport: 'badminton', size: 6, ageRange: [15, 28] },
+    { team: 'Karwan Table Tennis Squad', sport: 'table_tennis', size: 5, ageRange: [15, 27] },
+  ];
+
   tx(() => {
-    for (let i = 0; i < 46; i += 1) {
-      let first;
-      let last;
-      let key;
-      do {
-        first = pick(FIRST);
-        last = pick(LAST);
-        key = `${first} ${last}`;
-      } while (usedNames.has(key));
-      usedNames.add(key);
+    let index = 0;
+    for (const plan of SQUAD_PLAN) {
+      for (let n = 0; n < plan.size; n += 1) {
+        let first;
+        let last;
+        let key;
+        do {
+          first = pick(FIRST);
+          last = pick(LAST);
+          key = `${first} ${last}`;
+        } while (usedNames.has(key));
+        usedNames.add(key);
 
-      const female = FIRST.indexOf(first) >= 20;
-      const age = int(14, 32);
-      const dob = iso(new Date(today.getFullYear() - age, int(0, 11), int(1, 28)));
-      const isMinor = age < 18;
-      const athleteId = `${config.club.athleteIdPrefix}-${String(i + 1).padStart(6, '0')}`;
-      const status = chance(0.82) ? 'active' : pick(['injured', 'inactive', 'trial', 'alumni']);
+        const female = FIRST.indexOf(first) >= 20;
+        const age = int(plan.ageRange[0], plan.ageRange[1]);
+        const dob = iso(new Date(today.getFullYear() - age, int(0, 11), int(1, 28)));
+        const isMinor = age < 18;
+        index += 1;
+        const athleteId = `${config.club.athleteIdPrefix}-${String(index).padStart(6, '0')}`;
+        const status = chance(0.84) ? 'active' : pick(['injured', 'inactive', 'trial', 'alumni']);
 
-      const info = playerStmt.run(
-        athleteId, first, last, `${first} ${last}`, dob, female ? 'female' : 'male', pick(NATIONALITIES),
-        daysAgo(int(60, 1400)), status,
-        `+971 5${int(0, 9)} ${int(100, 999)} ${int(1000, 9999)}`,
-        `${first.toLowerCase()}.${last.toLowerCase()}@example.com`,
-        'Sharjah', 'United Arab Emirates',
-        `${pick(FIRST)} ${last}`, `+971 5${int(0, 9)} ${int(100, 999)} ${int(1000, 9999)}`, isMinor ? 'Parent' : 'Sibling',
-        isMinor ? `${pick(FIRST)} ${last}` : null, isMinor ? `+971 5${int(0, 9)} ${int(100, 999)} ${int(1000, 9999)}` : null,
-        int(158, 192), int(52, 88), chance(0.85) ? 'right' : 'left', chance(0.78) ? 'right' : 'left',
-        chance(0.3) ? 'public' : 'club',
-        `Joined the Karwan academy pathway and has progressed through the age groups.`,
-        adminId,
-      );
-      players.push({ id: info.lastInsertRowid, athleteId, first, last, dob, age, female, status });
+        const info = playerStmt.run(
+          athleteId, first, last, `${first} ${last}`, dob, female ? 'female' : 'male', pick(NATIONALITIES),
+          daysAgo(int(60, 1400)), status,
+          `+971 5${int(0, 9)} ${int(100, 999)} ${int(1000, 9999)}`,
+          `${first.toLowerCase()}.${last.toLowerCase()}@example.com`,
+          'Sharjah', 'United Arab Emirates',
+          `${pick(FIRST)} ${last}`, `+971 5${int(0, 9)} ${int(100, 999)} ${int(1000, 9999)}`, isMinor ? 'Parent' : 'Sibling',
+          isMinor ? `${pick(FIRST)} ${last}` : null, isMinor ? `+971 5${int(0, 9)} ${int(100, 999)} ${int(1000, 9999)}` : null,
+          int(158, 192), int(52, 88), chance(0.85) ? 'right' : 'left', chance(0.78) ? 'right' : 'left',
+          chance(0.3) ? 'public' : 'club',
+          'Joined the Karwan academy pathway and has progressed through the age groups.',
+          adminId,
+        );
+        players.push({
+          id: info.lastInsertRowid, athleteId, first, last, dob, age, female, status,
+          team: plan.team, sport: plan.sport,
+        });
+      }
     }
   });
+
   console.log(`[seed] ${players.length} athletes registered`);
 
   // Link the demo player and guardian accounts to a real athlete record.
@@ -331,35 +356,28 @@ async function main() {
       db.prepare('INSERT INTO player_status_history (player_id, status, effective_from, reason) VALUES (?,?,?,?)')
         .run(p.id, 'active', daysAgo(int(60, 1400)), 'Initial registration');
 
-      // Primary sport by band, then a genuine second sport for some athletes —
-      // this is what proves one identity spans multiple sports.
-      if (i < 16) {
-        const team = p.age >= 19 ? 'Karwan Cricket Senior XI' : p.age >= 17 ? 'Karwan Cricket U18' : 'Karwan Cricket U16';
-        assign(p, 'cricket', team, { primary: true });
-        // A real progression: U16 last season, U18 now.
-        if (team === 'Karwan Cricket U18' && chance(0.5)) {
-          const start = daysAgo(720);
-          const end = daysAgo(360);
-          const info = membershipStmt.run(teamId('Karwan Cricket U18 (2024–25)'), p.id, 'player', int(1, 99), start, end, 'promoted', null);
-          timeline.addEvent({ playerId: p.id, date: end, type: 'promotion', title: 'Promoted to the current U18 squad', sportId: sportId('cricket'), refTable: 'tm_promo', refId: info.lastInsertRowid, importance: 3 });
-        }
-      } else if (i < 32) {
-        const team = p.age >= 19 ? 'Karwan FC Senior' : p.age >= 17 ? 'Karwan FC U18' : 'Karwan FC U16';
-        assign(p, 'football', team, { primary: true });
-      } else if (i < 40) {
-        assign(p, 'basketball', p.age >= 19 ? 'Karwan Hoops Senior' : 'Karwan Hoops U18', { primary: true });
-      } else if (i < 44) {
-        assign(p, 'badminton', 'Karwan Badminton Squad', { primary: true });
-      } else {
-        assign(p, 'table_tennis', 'Karwan Table Tennis Squad', { primary: true });
+      assign(p, p.sport, p.team, { primary: true });
+
+      // A genuine progression: some of the current U18s came up from the
+      // squad that ran last season.
+      if (p.team === 'Karwan Cricket U18' && chance(0.45)) {
+        const start = daysAgo(720);
+        const end = daysAgo(360);
+        const info = membershipStmt.run(teamId('Karwan Cricket U18 (2024–25)'), p.id, 'player', int(1, 99), start, end, 'promoted', null);
+        timeline.addEvent({
+          playerId: p.id, date: end, type: 'promotion',
+          title: 'Promoted to the current U18 squad', sportId: sportId('cricket'),
+          refTable: 'tm_promo', refId: info.lastInsertRowid, importance: 3,
+        });
       }
 
-      // Multi-sport athletes
-      if (i % 7 === 0 && i < 32) {
+      // Multi-sport athletes: the point of the whole platform, so a real slice
+      // of the club plays two.
+      if (i % 9 === 0 && p.sport !== 'badminton') {
         assign(p, 'badminton', 'Karwan Badminton Squad', { primary: false });
       }
-      if (i % 11 === 0 && i < 16) {
-        assign(p, 'football', p.age >= 19 ? 'Karwan FC Senior' : 'Karwan FC U18', { primary: false });
+      if (i % 13 === 0 && p.sport === 'cricket' && p.age >= 19) {
+        assign(p, 'football', 'Karwan FC Senior', { primary: false });
       }
     });
   });
@@ -816,6 +834,386 @@ async function main() {
     });
   }));
 
+
+  /* ---- Ball-by-ball capture for a sample of matches ----------------- */
+  //
+  // A handful of completed matches are scored delivery by delivery so the
+  // analysis screen has something real to work with. Their scorecards are then
+  // rebuilt from those events, exactly as they would be if a scorer had worked
+  // through the match live — which also proves the derivation path end to end.
+
+  const periodStmt = db.prepare(`
+    INSERT INTO match_periods (match_id, sequence, label, team_id, team_label, opponent_label,
+                               planned_length, target, status)
+    VALUES (?,?,?,?,?,?,?,?,?)
+  `);
+  const eventStmt = db.prepare(`
+    INSERT INTO match_events (match_id, period_id, sequence, event_type, over_number, ball_in_over,
+      minute, clock, team_id, primary_player_id, secondary_player_id, tertiary_player_id,
+      x, y, outcome, payload_json, created_by)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+  `);
+
+  const SHOTS = ['drive', 'cut', 'pull', 'sweep', 'flick', 'glance', 'defence', 'loft'];
+  const LENGTHS = ['yorker', 'full', 'good', 'back of a length', 'short'];
+  const LINES = ['outside off', 'off stump', 'middle', 'leg stump', 'down leg'];
+  const DELIVERIES = ['seam', 'swing away', 'swing in', 'cutter', 'slower ball', 'off break', 'leg break'];
+
+  let eventCount = 0;
+  let scoredMatches = 0;
+
+  function scoreCricketMatch(matchId) {
+    const match = db.prepare('SELECT * FROM matches WHERE id = ?').get(matchId);
+    const squad = db
+      .prepare(`SELECT mp.player_id, ps.position FROM match_players mp
+                LEFT JOIN player_sports ps ON ps.player_id = mp.player_id AND ps.sport_id = ?
+                WHERE mp.match_id = ? ORDER BY mp.batting_order`)
+      .all(match.sport_id, matchId);
+    if (squad.length < 8) return false;
+
+    const ours = squad.map((s2) => s2.player_id);
+    const ourBowlers = squad
+      .filter((s2) => ['fast_bowler', 'medium_pacer', 'spinner', 'all_rounder'].includes(s2.position))
+      .map((s2) => s2.player_id);
+    const attack = (ourBowlers.length >= 3 ? ourBowlers : ours.slice(-5)).slice(0, 5);
+    const oppositionNames = ['R Fernandes', 'A Haddad', 'M Silva', 'T Nakamura', 'D Osei', 'K Rahman'];
+
+    let sequence = 0;
+
+    /**
+     * One innings. `weBat` decides which side owns the athlete records:
+     * when Karwan bats, the striker is one of ours and the bowler is an
+     * opposition name; when Karwan bowls, it is the other way round. That is
+     * what keeps batting and bowling statistics on the right athletes — and
+     * stops anyone bowling to themselves.
+     */
+    function playInnings(sequenceNo, weBat) {
+      const info = periodStmt.run(
+        matchId, sequenceNo,
+        `${sequenceNo === 1 ? '1st' : '2nd'} innings`,
+        weBat ? match.home_team_id : null,
+        weBat ? null : match.opponent_name,
+        weBat ? match.opponent_name : null,
+        12, null, 'complete',
+      );
+      const periodId = info.lastInsertRowid;
+
+      const batters = weBat ? ours.slice(0, 7) : oppositionNames.slice(0, 5).map(() => null);
+      const batterLabels = weBat ? [] : [...oppositionNames];
+      let strikerIndex = 0;
+      let nextBatterIndex = weBat ? 2 : 2;
+      let wickets = 0;
+
+      for (let over = 0; over < 12 && wickets < 6; over += 1) {
+        const bowlerId = weBat ? null : attack[over % attack.length];
+        const bowlerLabel = weBat ? oppositionNames[over % oppositionNames.length] : null;
+
+        sequence += 1;
+        eventStmt.run(matchId, periodId, sequence, 'over_start', over, null, null, null,
+          match.home_team_id, bowlerId, null, null, null, null, null,
+          JSON.stringify({ over_number: over + 1, opposition_role: weBat ? 'bowler' : null }), statsUserId);
+        eventCount += 1;
+
+        let ball = 1;
+        while (ball <= 6 && wickets < 6) {
+          const strikerId = weBat ? batters[strikerIndex] : null;
+          const strikerLabel = weBat ? null : batterLabels[strikerIndex % batterLabels.length];
+
+          const payload = {
+            shot: pick(SHOTS),
+            length: pick(LENGTHS),
+            line: pick(LINES),
+            delivery_type: pick(DELIVERIES),
+            speed_kph: int(112, 148),
+            control: chance(0.78) ? 1 : 0,
+          };
+          if (weBat) payload.opposition_role = 'bowler';
+
+          let outcome;
+          const roll = rnd();
+          if (roll < 0.04) {
+            payload.extras = 1;
+            payload.extra_type = chance(0.6) ? 'wide' : 'no ball';
+            payload.runs_batter = 0;
+            outcome = payload.extra_type === 'wide' ? 'wide' : 'noball';
+          } else if (roll < 0.10 && wickets < 5) {
+            payload.runs_batter = 0;
+            payload.wicket = 1;
+            payload.dismissal = pick(['bowled', 'caught', 'lbw', 'caught behind', 'stumped', 'run out']);
+            if (strikerId) payload.dismissed_player_id = strikerId;
+            outcome = 'wicket';
+          } else if (roll < 0.42) {
+            payload.runs_batter = 0;
+            payload.beaten = chance(0.25) ? 1 : 0;
+            outcome = 'dot';
+          } else if (roll < 0.72) {
+            payload.runs_batter = chance(0.75) ? 1 : 2;
+            outcome = payload.runs_batter === 1 ? 'single' : 'two';
+          } else if (roll < 0.78) {
+            payload.runs_batter = 3;
+            outcome = 'three';
+          } else if (roll < 0.93) {
+            payload.runs_batter = 4;
+            outcome = 'four';
+          } else {
+            payload.runs_batter = 6;
+            outcome = 'six';
+          }
+
+          // A catch or run out is taken by a fielder, so it only credits one of
+          // ours when we are the fielding side.
+          const fielderId = !weBat && payload.dismissal
+            && !['bowled', 'lbw'].includes(payload.dismissal)
+            ? pick(ours.filter((f) => f !== bowlerId))
+            : null;
+
+          sequence += 1;
+          eventStmt.run(
+            matchId, periodId, sequence, 'ball', over, ball, null, null,
+            match.home_team_id, strikerId, bowlerId, fielderId,
+            payload.runs_batter > 0 ? int(5, 95) : null,
+            payload.runs_batter > 0 ? int(5, 95) : null,
+            outcome, JSON.stringify(payload),
+            statsUserId,
+          );
+          // Record who the opposition actor was, for readable commentary.
+          if (weBat || strikerLabel) {
+            db.prepare('UPDATE match_events SET opponent_name = ? WHERE match_id = ? AND sequence = ?')
+              .run(weBat ? bowlerLabel : strikerLabel, matchId, sequence);
+          }
+          eventCount += 1;
+
+          if (payload.wicket) {
+            wickets += 1;
+            if (weBat) {
+              if (nextBatterIndex < batters.length) {
+                batters[strikerIndex] = batters[nextBatterIndex];
+                nextBatterIndex += 1;
+              } else break;
+            } else {
+              strikerIndex = (strikerIndex + 1) % batterLabels.length;
+            }
+          } else if ([1, 3].includes(payload.runs_batter)) {
+            strikerIndex = weBat ? (strikerIndex === 0 ? 1 : 0) : strikerIndex;
+          }
+
+          const extra = payload.extra_type;
+          if (extra !== 'wide' && extra !== 'no ball') ball += 1;
+        }
+        if (weBat) strikerIndex = strikerIndex === 0 ? 1 : 0;
+      }
+    }
+
+    playInnings(1, true);    // Karwan batting
+    playInnings(2, false);   // Karwan bowling
+    scoredMatches += 1;
+    return true;
+  }
+
+  function scoreFootballMatch(matchId) {
+    const match = db.prepare('SELECT * FROM matches WHERE id = ?').get(matchId);
+    const squad = db
+      .prepare(`SELECT mp.player_id, ps.position FROM match_players mp
+                LEFT JOIN player_sports ps ON ps.player_id = mp.player_id AND ps.sport_id = ?
+                WHERE mp.match_id = ?`)
+      .all(match.sport_id, matchId);
+    if (squad.length < 7) return false;
+
+    const keeper = squad.find((s) => s.position === 'GK')?.player_id || squad[0].player_id;
+    const outfield = squad.filter((s) => s.player_id !== keeper).map((s) => s.player_id);
+    const attackers = squad.filter((s) => ['ST', 'LW', 'RW', 'AM'].includes(s.position)).map((s) => s.player_id);
+    const defenders = squad.filter((s) => ['CB', 'LB', 'RB', 'DM'].includes(s.position)).map((s) => s.player_id);
+    const shooters = attackers.length ? attackers : outfield;
+
+    let sequence = 0;
+    for (const half of [1, 2]) {
+      const info = periodStmt.run(matchId, half, `${half === 1 ? '1st' : '2nd'} half`,
+        match.home_team_id, null, match.opponent_name, 45, null, 'complete');
+      const periodId = info.lastInsertRowid;
+      const base = half === 1 ? 0 : 45;
+
+      for (let n = 0; n < int(9, 15); n += 1) {
+        const minute = base + int(1, 44);
+        const roll = rnd();
+        sequence += 1;
+
+        if (roll < 0.3) {
+          const shooter = pick(shooters);
+          const onTarget = chance(0.45);
+          const goal = onTarget && chance(0.3);
+          eventStmt.run(matchId, periodId, sequence, 'shot', null, null, minute, `${minute}:00`,
+            match.home_team_id, shooter, goal ? pick(outfield.filter((p) => p !== shooter)) : null,
+            onTarget && !goal ? keeper : null,
+            int(60, 96), int(20, 80),
+            goal ? 'goal' : onTarget ? 'saved' : 'off_target',
+            JSON.stringify({
+              on_target: onTarget ? 1 : 0, goal: goal ? 1 : 0,
+              saved: onTarget && !goal ? 1 : 0,
+              body_part: pick(['right foot', 'left foot', 'head']),
+              situation: pick(['open play', 'counter', 'corner', 'free kick']),
+              big_chance: chance(0.2) ? 1 : 0,
+            }), statsUserId);
+        } else if (roll < 0.55) {
+          eventStmt.run(matchId, periodId, sequence, 'pass', null, null, minute, null,
+            match.home_team_id, pick(outfield), pick(outfield), null,
+            int(30, 80), int(10, 90), 'completed',
+            JSON.stringify({ completed: chance(0.75) ? 1 : 0, pass_type: pick(['through ball', 'cross', 'long ball', 'cut-back']) }), statsUserId);
+        } else if (roll < 0.78) {
+          eventStmt.run(matchId, periodId, sequence, 'defensive', null, null, minute, null,
+            match.home_team_id, pick(defenders.length ? defenders : outfield), null, null,
+            int(5, 55), int(10, 90), null,
+            JSON.stringify({ action: pick(['tackle', 'interception', 'clearance', 'duel won', 'recovery']), successful: chance(0.8) ? 1 : 0 }), statsUserId);
+        } else if (roll < 0.88) {
+          eventStmt.run(matchId, periodId, sequence, 'save', null, null, minute, null,
+            match.home_team_id, keeper, null, null, int(2, 14), int(35, 65), 'save',
+            JSON.stringify({ save_type: pick(['catch', 'parry', 'tip over', 'one on one']) }), statsUserId);
+        } else if (roll < 0.96) {
+          eventStmt.run(matchId, periodId, sequence, 'foul', null, null, minute, null,
+            match.home_team_id, pick(outfield), null, null, int(10, 90), int(10, 90), 'foul',
+            JSON.stringify({ won_free_kick: 1 }), statsUserId);
+        } else {
+          eventStmt.run(matchId, periodId, sequence, 'card', null, null, minute, null,
+            match.home_team_id, pick(outfield), null, null, null, null, 'yellow',
+            JSON.stringify({ card: 'yellow', reason: pick(['dissent', 'late tackle', 'time wasting']) }), statsUserId);
+        }
+        eventCount += 1;
+      }
+    }
+    scoredMatches += 1;
+    return true;
+  }
+
+  function scoreBasketballMatch(matchId) {
+    const match = db.prepare('SELECT * FROM matches WHERE id = ?').get(matchId);
+    const squad = db.prepare('SELECT player_id FROM match_players WHERE match_id = ?').all(matchId).map((r) => r.player_id);
+    if (squad.length < 5) return false;
+
+    let sequence = 0;
+    for (let q = 1; q <= 4; q += 1) {
+      const info = periodStmt.run(matchId, q, `Q${q}`, match.home_team_id, null, match.opponent_name, 10, null, 'complete');
+      const periodId = info.lastInsertRowid;
+      const base = (q - 1) * 10;
+
+      for (let n = 0; n < int(10, 16); n += 1) {
+        const minute = base + rnd() * 10;
+        const roll = rnd();
+        sequence += 1;
+
+        if (roll < 0.55) {
+          const shooter = pick(squad);
+          const three = chance(0.35);
+          const made = chance(three ? 0.36 : 0.5);
+          eventStmt.run(matchId, periodId, sequence, 'shot', null, null, round1(minute), null,
+            match.home_team_id, shooter, made ? pick(squad.filter((p) => p !== shooter)) : null,
+            !made && chance(0.15) ? pick(squad.filter((p) => p !== shooter)) : null,
+            three ? int(5, 95) : int(30, 70), three ? int(5, 60) : int(55, 95),
+            made ? (three ? 'made3' : 'made2') : (three ? 'miss3' : 'miss2'),
+            JSON.stringify({
+              points: three ? '3' : '2', made: made ? 1 : 0,
+              shot_type: three ? 'jump shot' : pick(['layup', 'dunk', 'jump shot', 'floater']),
+              fastbreak: chance(0.2) ? 1 : 0,
+            }), statsUserId);
+        } else if (roll < 0.8) {
+          eventStmt.run(matchId, periodId, sequence, 'rebound', null, null, round1(minute), null,
+            match.home_team_id, pick(squad), null, null, null, null, null,
+            JSON.stringify({ kind: chance(0.7) ? 'defensive' : 'offensive' }), statsUserId);
+        } else if (roll < 0.92) {
+          const loser = pick(squad);
+          eventStmt.run(matchId, periodId, sequence, 'turnover', null, null, round1(minute), null,
+            match.home_team_id, loser, chance(0.5) ? pick(squad.filter((p) => p !== loser)) : null, null,
+            null, null, null,
+            JSON.stringify({ kind: pick(['bad pass', 'lost ball', 'travel', 'shot clock']) }), statsUserId);
+        } else {
+          eventStmt.run(matchId, periodId, sequence, 'foul', null, null, round1(minute), null,
+            match.home_team_id, pick(squad), null, null, null, null, null,
+            JSON.stringify({ kind: pick(['personal', 'shooting', 'offensive']) }), statsUserId);
+        }
+        eventCount += 1;
+      }
+    }
+    scoredMatches += 1;
+    return true;
+  }
+
+  function scoreRacketMatch(matchId, pointsPerSet) {
+    const match = db.prepare('SELECT * FROM matches WHERE id = ?').get(matchId);
+    const squad = db.prepare('SELECT player_id FROM match_players WHERE match_id = ?').all(matchId).map((r) => r.player_id);
+    if (!squad.length) return false;
+    const player = squad[0];
+
+    let sequence = 0;
+    for (let set = 1; set <= int(2, 3); set += 1) {
+      const info = periodStmt.run(matchId, set, `Set ${set}`, match.home_team_id, null,
+        match.opponent_name, pointsPerSet, null, 'complete');
+      const periodId = info.lastInsertRowid;
+
+      let us = 0;
+      let them = 0;
+      while (us < pointsPerSet && them < pointsPerSet) {
+        const won = chance(0.53);
+        if (won) us += 1; else them += 1;
+        sequence += 1;
+        eventStmt.run(matchId, periodId, sequence, 'point', null, null, null, null,
+          match.home_team_id, player, null, null, int(5, 95), int(5, 95),
+          won ? 'won' : 'lost',
+          JSON.stringify({
+            won_by_us: won ? 1 : 0,
+            reason: won
+              ? pick(['winner', 'smash', 'drop', 'service ace', 'forced error'])
+              : pick(['unforced error', 'service fault', 'forced error']),
+            rally_length: int(1, 28),
+            serving: chance(0.5) ? 1 : 0,
+            duration_seconds: int(4, 45),
+          }), statsUserId);
+        eventCount += 1;
+      }
+    }
+    scoredMatches += 1;
+    return true;
+  }
+
+  const round1 = (n) => Math.round(n * 10) / 10;
+
+  tx(() => {
+    const cricketMatches = db
+      .prepare(`SELECT id FROM matches WHERE sport_id = ? AND status = 'completed' ORDER BY scheduled_at DESC LIMIT 4`)
+      .all(sportId('cricket'));
+    cricketMatches.forEach((m) => scoreCricketMatch(m.id));
+
+    const footballMatches = db
+      .prepare(`SELECT id FROM matches WHERE sport_id = ? AND status = 'completed' ORDER BY scheduled_at DESC LIMIT 3`)
+      .all(sportId('football'));
+    footballMatches.forEach((m) => scoreFootballMatch(m.id));
+
+    const basketballMatches = db
+      .prepare(`SELECT id FROM matches WHERE sport_id = ? AND status = 'completed' ORDER BY scheduled_at DESC LIMIT 2`)
+      .all(sportId('basketball'));
+    basketballMatches.forEach((m) => scoreBasketballMatch(m.id));
+
+    const badmintonMatches = db
+      .prepare(`SELECT id FROM matches WHERE sport_id = ? AND status = 'completed' ORDER BY scheduled_at DESC LIMIT 2`)
+      .all(sportId('badminton'));
+    badmintonMatches.forEach((m) => scoreRacketMatch(m.id, 21));
+
+    const ttMatches = db
+      .prepare(`SELECT id FROM matches WHERE sport_id = ? AND status = 'completed' ORDER BY scheduled_at DESC LIMIT 1`)
+      .all(sportId('table_tennis'));
+    ttMatches.forEach((m) => scoreRacketMatch(m.id, 11));
+  });
+
+  // Rebuild the scorecards of every ball-by-ball match from its events, so the
+  // derived statistics replace the summary figures generated earlier.
+  const { refreshPerformances } = require('../routes/match-events');
+  const scored = db.prepare('SELECT DISTINCT match_id FROM match_events').all();
+  let rebuilt = 0;
+  for (const row of scored) {
+    const m = db.prepare('SELECT * FROM matches WHERE id = ?').get(row.match_id);
+    const sp = db.prepare('SELECT * FROM sports WHERE id = ?').get(m.sport_id);
+    const result = refreshPerformances(m, { ...sp, config: JSON.parse(sp.config_json) }, adminId);
+    rebuilt += result.updated;
+  }
+  console.log(`[seed] ${eventCount} events across ${scoredMatches} matches; ${rebuilt} scorecards rebuilt from them`);
+
   const counts = {
     users: db.prepare('SELECT COUNT(*) AS c FROM users').get().c,
     players: db.prepare('SELECT COUNT(*) AS c FROM players').get().c,
@@ -826,6 +1224,8 @@ async function main() {
     assessments: db.prepare('SELECT COUNT(*) AS c FROM assessments').get().c,
     achievements: db.prepare('SELECT COUNT(*) AS c FROM achievements').get().c,
     timeline: db.prepare('SELECT COUNT(*) AS c FROM player_timeline').get().c,
+    events: db.prepare('SELECT COUNT(*) AS c FROM match_events').get().c,
+    periods: db.prepare('SELECT COUNT(*) AS c FROM match_periods').get().c,
   };
 
   console.log('\n[seed] demo club ready');

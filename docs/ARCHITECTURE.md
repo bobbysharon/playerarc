@@ -118,6 +118,41 @@ not-out innings cannot also record a dismissal.
 
 ---
 
+## A match is a stream of events
+
+The tables above record what a match produced. `match_periods` and `match_events` record how it
+happened, and everything else about the match is read off them.
+
+One delivery is one row: the striker, the bowler, the fielder, where the ball pitched, where it went,
+the shot played, the speed, whether the batter was in control, and what the outcome was. From that
+stream `lib/match-analysis.js` derives the batting and bowling cards, the run rate, partnerships,
+fall of wickets, phase splits, the wagon wheel, the pitch map, dot-ball and control percentages, the
+head-to-head matchups and the commentary. None of it is stored.
+
+Two things follow from that.
+
+**A scorer never types a scorecard twice.** Each sport declares `derive` rules mapping events to the
+match statistics they produce — runs from `runs_batter` on the striker, wickets from a dismissal on
+the bowler unless it was a run out, assists from the secondary player on a scored shot. Saving an
+event runs those rules and refreshes `match_performances`, which is the same table a typed scorecard
+writes to, so career records, ratings and leaderboards need no special handling. Statistics events
+cannot produce are left alone, so a hand-entered coach rating survives.
+
+**A correction propagates everywhere.** Fix one delivery and the bowler's economy, the batter's
+strike rate, the partnership, the phase totals, the athlete's career average and their leaderboard
+position are all right on the next read, because every one of them is computed from that delivery
+rather than from a stored total.
+
+Event definitions are configuration, like statistics: `lib/event-configs.js` declares each sport's
+event types, their fields and valid outcomes, the quick-entry buttons, the coordinate surface, the
+phase boundaries and the derivation rules. The scoring console and the analysis screen render
+themselves from it. Adding handball would mean adding one block.
+
+Two details worth knowing. Cricket positions its own deliveries: the API works out the over and ball
+from the previous delivery and knows a wide or no ball is re-bowled rather than advancing the over.
+And match totals for a ball-based sport are summed from the innings rather than recomputed over
+merged events — recomputing would put over 1 in the data twice and report a 24-over innings.
+
 ## History is closed, not overwritten
 
 | Change | What happens |

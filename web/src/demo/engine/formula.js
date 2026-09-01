@@ -1,6 +1,6 @@
 /* AUTO-GENERATED — do not edit.
  * Converted from server/src/lib/formula.js by scripts/build-demo-engine.mjs.
- * Edit the server module and re-run: npm run demo:build
+ * Edit the server module and re-run: npm run demo:data
  */
 /**
  * A tiny, dependency-free arithmetic expression evaluator.

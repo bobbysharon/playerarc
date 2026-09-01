@@ -27,6 +27,7 @@ const TABLES = [
   'training_sessions', 'training_attendance',
   'assessment_criteria', 'assessments', 'assessment_scores',
   'achievements', 'media', 'documents', 'settings', 'player_staff',
+  'match_periods', 'match_events',
 ];
 
 const data = {};

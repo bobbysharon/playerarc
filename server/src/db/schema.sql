@@ -400,23 +400,84 @@ CREATE TABLE IF NOT EXISTS match_performances (
 );
 CREATE INDEX IF NOT EXISTS idx_perf_player_sport ON match_performances(player_id, sport_id);
 
--- Forward-compatible ball-by-ball / event store (cricket, football, etc.).
--- Not populated in Phase 2, but the relationship exists so live scoring can
--- be added later without restructuring.
+-- ---------------------------------------------------------------------
+-- 5b. BALL-BY-BALL / EVENT CAPTURE
+--
+-- The deep layer. Everything above records what a match produced; this
+-- records how it happened, one delivery, shot, goal or point at a time.
+--
+-- Two rules make it work across sports:
+--   * A period is whatever the sport divides a match into — a cricket
+--     innings, a football half, a basketball quarter, a badminton set.
+--   * An event is one indivisible thing that happened inside a period.
+--     Its sport-specific detail lives in payload_json, described by
+--     sports.config_json → events.types, exactly as match statistics are.
+--
+-- Nothing derived is stored here. Scorecards, run rates, partnerships,
+-- spells, momentum and every chart in the analysis screen are computed
+-- from these rows, so correcting one delivery corrects all of them.
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS match_periods (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  match_id       INTEGER NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+  sequence       INTEGER NOT NULL,          -- 1, 2, 3, 4…
+  label          TEXT NOT NULL,             -- "1st innings", "Q1", "2nd half", "Set 1"
+  team_id        INTEGER REFERENCES teams(id) ON DELETE SET NULL,  -- batting / attacking side
+  team_label     TEXT,                      -- used when the side is not a club team
+  opponent_label TEXT,
+  planned_length REAL,                      -- overs, minutes, points to win
+  target         INTEGER,                   -- runs to chase, where relevant
+  status         TEXT NOT NULL DEFAULT 'pending'
+                 CHECK (status IN ('pending','in_progress','complete','abandoned')),
+  notes          TEXT,
+  created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at     TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (match_id, sequence)
+);
+CREATE INDEX IF NOT EXISTS idx_periods_match ON match_periods(match_id, sequence);
+
 CREATE TABLE IF NOT EXISTS match_events (
   id                  INTEGER PRIMARY KEY AUTOINCREMENT,
   match_id            INTEGER NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
-  innings             INTEGER,
-  sequence            INTEGER NOT NULL,
-  period              TEXT,          -- over number, quarter, set
+  period_id           INTEGER REFERENCES match_periods(id) ON DELETE CASCADE,
+  sequence            INTEGER NOT NULL,      -- order within the match
+  event_type          TEXT NOT NULL,         -- ball, goal, shot, card, substitution, point…
+
+  -- Where in the period. Cricket uses over + ball_in_over; clock sports use
+  -- minute; racket sports use rally. Whichever the sport declares.
+  over_number         REAL,
+  ball_in_over        INTEGER,
+  minute              REAL,
   clock               TEXT,
-  event_type          TEXT NOT NULL, -- ball, goal, card, substitution, point
+
+  -- Who was involved. For a delivery: striker, bowler, fielder.
+  -- For a goal: scorer, assister. For a shot: shooter, blocker.
+  team_id             INTEGER REFERENCES teams(id) ON DELETE SET NULL,
   primary_player_id   INTEGER REFERENCES players(id) ON DELETE SET NULL,
   secondary_player_id INTEGER REFERENCES players(id) ON DELETE SET NULL,
+  tertiary_player_id  INTEGER REFERENCES players(id) ON DELETE SET NULL,
+  opponent_name       TEXT,                  -- when the actor is on the other side
+
+  -- Where on the field. 0–100 in each axis so any pitch, court or ground
+  -- maps onto the same coordinate space for shot maps and wagon wheels.
+  x                   REAL,
+  y                   REAL,
+  end_x               REAL,
+  end_y               REAL,
+
+  outcome             TEXT,                  -- headline result: "four", "wicket", "goal", "save"
   payload_json        TEXT NOT NULL DEFAULT '{}',
-  created_at          TEXT NOT NULL DEFAULT (datetime('now'))
+  commentary          TEXT,                  -- generated, editable
+  is_void             INTEGER NOT NULL DEFAULT 0,   -- corrected deliveries stay, flagged
+  created_by          INTEGER REFERENCES users(id),
+  created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at          TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_events_match ON match_events(match_id, sequence);
+CREATE INDEX IF NOT EXISTS idx_events_period ON match_events(period_id, sequence);
+CREATE INDEX IF NOT EXISTS idx_events_primary ON match_events(primary_player_id);
+CREATE INDEX IF NOT EXISTS idx_events_secondary ON match_events(secondary_player_id);
+CREATE INDEX IF NOT EXISTS idx_events_type ON match_events(match_id, event_type);
 
 -- ---------------------------------------------------------------------
 -- 6. TRAINING

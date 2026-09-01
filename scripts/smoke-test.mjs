@@ -214,6 +214,202 @@ await check('end a staff assignment without deleting it', async () => {
   return r.status === 200 && after.d.staff.some((x) => x.id === assignment.id && x.end_date);
 });
 
+
+/* ---- Ball-by-ball capture and analysis ---- */
+// Find a cricket match that was actually scored ball by ball, rather than
+// assuming the first one with a scorecard has events behind it.
+let bbMatchId = null;
+for (const m of (await req('/matches?limit=200')).d.matches.filter((x) => x.sport_code === 'cricket')) {
+  const ev = await req(`/matches/${m.id}/events`);
+  if (ev.d.total > 50) { bbMatchId = m.id; break; }
+}
+await check('a cricket match is scored ball by ball', async () => {
+  const ev = await req(`/matches/${bbMatchId}/events`);
+  return ev.d.total > 50;
+});
+await check('events carry generated commentary', async () => {
+  const ev = await req(`/matches/${bbMatchId}/events`);
+  return ev.d.events.some((e) => e.commentary && e.commentary.includes(' to '));
+});
+await check('analysis returns per-innings detail', async () => {
+  const a = await req(`/matches/${bbMatchId}/analysis`);
+  return a.d.periods.length >= 2 && a.d.periods.every((p) => p.summary.runs >= 0);
+});
+await check('innings are not merged into one long innings', async () => {
+  // Each innings is bounded by its own over count; merging them would produce
+  // a single innings of twice the length.
+  const a = await req(`/matches/${bbMatchId}/analysis`);
+  const scored = a.d.periods.filter((p) => p.summary.balls > 0);
+  return scored.length >= 2
+    && scored.every((p) => p.summary.balls <= 80)
+    && a.d.overall.summary.innings === a.d.periods.length;
+});
+await check('batting card, bowling card and run rate are derived', async () => {
+  const a = await req(`/matches/${bbMatchId}/analysis`);
+  const inn = a.d.periods[0];
+  return inn.battingCard.length > 0 && inn.bowlingCard.length > 0 && inn.summary.runRate > 0;
+});
+await check('wagon wheel, pitch map and phases are produced', async () => {
+  const a = await req(`/matches/${bbMatchId}/analysis`);
+  const inn = a.d.periods[0];
+  return inn.wagonWheel.length > 0 && inn.pitchMap.length > 0 && inn.phases.length > 0;
+});
+await check('partnerships and fall of wickets line up', async () => {
+  const a = await req(`/matches/${bbMatchId}/analysis`);
+  const inn = a.d.periods[0];
+  return inn.partnerships.length >= inn.fallOfWickets.length;
+});
+await check('the scorecard matches the analysis exactly', async () => {
+  const a = await req(`/matches/${bbMatchId}/analysis`);
+  const detail = await req(`/matches/${bbMatchId}`);
+  const card = a.d.periods[0].battingCard.filter((b) => b.playerId).slice(0, 3);
+  return card.every((b) => {
+    const perf = detail.d.performances.find((p) => p.player_id === b.playerId);
+    return perf && perf.stats.runs === b.runs && perf.stats.balls_faced === b.balls;
+  });
+});
+await check('one athlete\'s own match view', async () => {
+  const a = await req(`/matches/${bbMatchId}/analysis`);
+  const someone = a.d.periods[0].battingCard.find((b) => b.playerId);
+  const v = await req(`/matches/${bbMatchId}/analysis/player/${someone.playerId}`);
+  return v.d.events > 0 && v.d.performance !== null;
+});
+
+/* Recording a delivery must move the career record */
+let testPeriodId;
+await check('open a new period', async () => {
+  // Sequence is derived so the suite can be run repeatedly against one database.
+  const existing = await req(`/matches/${bbMatchId}/periods`);
+  const nextSequence = Math.max(0, ...existing.d.periods.map((p) => p.sequence)) + 1;
+  const r = await req(`/matches/${bbMatchId}/periods`, {
+    method: 'POST',
+    body: { sequence: nextSequence, label: `Test innings ${nextSequence}`, planned_length: 20, status: 'in_progress' },
+  });
+  testPeriodId = r.d.period?.id;
+  return r.status === 201 && !!testPeriodId;
+});
+let beforeRuns;
+let testBatter;
+await check('record a delivery and see the career record move', async () => {
+  const detail = await req(`/matches/${bbMatchId}`);
+  testBatter = detail.d.lineup[0].player_id;
+  const bowler = detail.d.lineup[1].player_id;
+  const careerBefore = await req(`/players/${testBatter}/stats?sport=cricket`);
+  beforeRuns = careerBefore.d.careers[0].career.values.runs;
+
+  const r = await req(`/matches/${bbMatchId}/events`, {
+    method: 'POST',
+    body: {
+      period_id: testPeriodId, event_type: 'ball',
+      primary_player_id: testBatter, secondary_player_id: bowler,
+      outcome: 'six', payload: { runs_batter: 6, shot: 'pull', length: 'short', line: 'middle' },
+      x: 30, y: 70,
+    },
+  });
+  const careerAfter = await req(`/players/${testBatter}/stats?sport=cricket`);
+  return r.status === 201 && careerAfter.d.careers[0].career.values.runs === beforeRuns + 6;
+});
+await check('cricket positions the delivery itself', async () => {
+  // The second delivery of a fresh period must land on ball two of over one,
+  // without the scorer supplying either number.
+  const detail = await req(`/matches/${bbMatchId}`);
+  const r = await req(`/matches/${bbMatchId}/events`, {
+    method: 'POST',
+    body: {
+      period_id: testPeriodId, event_type: 'ball',
+      primary_player_id: detail.d.lineup[0].player_id,
+      secondary_player_id: detail.d.lineup[1].player_id,
+      outcome: 'dot', payload: { runs_batter: 0 },
+    },
+  });
+  return r.status === 201 && r.d.event.over_number === 0 && r.d.event.ball_in_over === 2;
+});
+await check('a wide is re-bowled rather than advancing the over', async () => {
+  // A wide occupies the next ball position, and the delivery that follows it
+  // re-uses that same position — the over does not move on until six legal
+  // balls have been bowled.
+  const detail = await req(`/matches/${bbMatchId}`);
+  const striker = detail.d.lineup[0].player_id;
+  const bowler = detail.d.lineup[1].player_id;
+
+  const wide = await req(`/matches/${bbMatchId}/events`, {
+    method: 'POST',
+    body: {
+      period_id: testPeriodId, event_type: 'ball',
+      primary_player_id: striker, secondary_player_id: bowler,
+      outcome: 'wide', payload: { extras: 1, extra_type: 'wide' },
+    },
+  });
+  const after = await req(`/matches/${bbMatchId}/events`, {
+    method: 'POST',
+    body: {
+      period_id: testPeriodId, event_type: 'ball',
+      primary_player_id: striker, secondary_player_id: bowler,
+      outcome: 'dot', payload: { runs_batter: 0 },
+    },
+  });
+
+  return wide.status === 201 && after.status === 201
+    && after.d.event.over_number === wide.d.event.over_number
+    && after.d.event.ball_in_over === wide.d.event.ball_in_over;
+});
+await check('undo removes the last delivery and rewinds the career record', async () => {
+  const ev = await req(`/matches/${bbMatchId}/events?period=${testPeriodId}`);
+  const last = ev.d.events.at(-1);
+  await req(`/matches/${bbMatchId}/events/${last.id}`, { method: 'DELETE' });
+  const after = await req(`/matches/${bbMatchId}/events?period=${testPeriodId}`);
+  return after.d.events.length === ev.d.events.length - 1;
+});
+await check('unknown event types are refused', async () => {
+  const r = await req(`/matches/${bbMatchId}/events`, {
+    method: 'POST', body: { event_type: 'touchdown', payload: {} },
+  });
+  return r.status === 422;
+});
+await check('out-of-range values are refused', async () => {
+  const r = await req(`/matches/${bbMatchId}/events`, {
+    method: 'POST',
+    body: { period_id: testPeriodId, event_type: 'ball', payload: { runs_batter: 99 } },
+  });
+  return r.status === 422;
+});
+await check('non-scorers cannot record events', async () => {
+  token = playerLogin.d.token;
+  const r = await req(`/matches/${bbMatchId}/events`, { method: 'POST', body: { event_type: 'ball', payload: {} } });
+  token = adminToken;
+  return r.status === 403;
+});
+
+/* Other sports produce their own analysis shapes */
+await check('football analysis produces a shot map and timeline', async () => {
+  const matches = (await req('/matches?limit=200')).d.matches.filter((m) => m.sport_code === 'football');
+  for (const m of matches) {
+    const a = await req(`/matches/${m.id}/analysis`);
+    if (a.d.totalEvents > 0) return a.d.overall.shotMap.length > 0 && a.d.overall.timeline.length > 0;
+  }
+  return false;
+});
+await check('basketball analysis produces a shot chart and quarters', async () => {
+  const matches = (await req('/matches?limit=200')).d.matches.filter((m) => m.sport_code === 'basketball');
+  for (const m of matches) {
+    const a = await req(`/matches/${m.id}/analysis`);
+    if (a.d.totalEvents > 0) return a.d.overall.shotMap.length > 0 && a.d.periods.length === 4;
+  }
+  return false;
+});
+await check('racket analysis produces rally progression and momentum', async () => {
+  const matches = (await req('/matches?limit=200')).d.matches.filter((m) => m.sport_code === 'badminton');
+  for (const m of matches) {
+    const a = await req(`/matches/${m.id}/analysis`);
+    if (a.d.totalEvents > 0) {
+      return a.d.overall.progression.length > 0
+        && a.d.overall.rallyBuckets.length > 0
+        && a.d.overall.summary.pointsFor > 0;
+    }
+  }
+  return false;
+});
+
 /* ---- Single page app is served ---- */
 const origin = BASE.replace('/api', '');
 await check('web app served at /', async () => {

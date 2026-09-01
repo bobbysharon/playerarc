@@ -30,6 +30,7 @@ app.use('/api/sports', require('./routes/sports'));
 app.use('/api/teams', require('./routes/teams'));
 app.use('/api/coaches', require('./routes/coaches'));
 app.use('/api', require('./routes/competitions'));      // /tournaments, /matches
+app.use('/api', require('./routes/match-events'));      // ball-by-ball capture and analysis
 app.use('/api/training', require('./routes/training'));
 app.use('/api/assessments', require('./routes/assessments'));
 app.use('/api/achievements', require('./routes/achievements'));

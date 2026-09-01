@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { BarChart3, Radio } from 'lucide-react';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import {
@@ -38,6 +39,10 @@ export default function MatchDetail() {
         actions={
           <>
             <Chip tone={m.result || m.status}>{titleCase(m.result || m.status)}</Chip>
+            <Link to={`/matches/${id}/analysis`} className="btn-ghost"><BarChart3 size={14} /> Analysis</Link>
+            {can('performances.write') && (
+              <Link to={`/matches/${id}/scoring`} className="btn-ghost"><Radio size={14} /> Score ball by ball</Link>
+            )}
             {can('matches.write') && <button type="button" className="btn-ghost" onClick={() => setEditingLineup(true)}>Select squad</button>}
             {can('matches.write') && <button type="button" className="btn-gold" onClick={() => setEditingResult(true)}>Match result</button>}
           </>

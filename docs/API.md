@@ -58,6 +58,47 @@ training, record) · `POST /teams` · `PUT /teams/:id` · `POST /teams/:id/membe
 | PUT | `/matches/:id/performances` | Batch upsert of statistics; returns `{ saved, milestones }` |
 | DELETE | `/matches/:id/performances/:playerId` | |
 
+## Ball-by-ball capture and analysis
+
+A **period** is whatever the sport divides a match into — a cricket innings, a football half, a
+basketball quarter, a badminton set. An **event** is one thing that happened inside it, described by
+the sport's own `events.types` configuration.
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| GET | `/matches/:id/periods` | Innings, halves, quarters or sets |
+| POST | `/matches/:id/periods` | Open one. `team_id` set means Karwan owns the athlete records for it |
+| PUT | `/matches/:id/periods/:periodId` | Close it, set a target, correct a label |
+| GET | `/matches/:id/events` | `period, type, player`. Each event carries generated commentary |
+| POST | `/matches/:id/events` | Record one. Cricket positions its own over and ball; a wide is re-bowled |
+| PUT | `/matches/:id/events/:eventId` | Correct one, or void it with `is_void` |
+| DELETE | `/matches/:id/events/:eventId` | Deletes the last event; voids any earlier one |
+| GET | `/matches/:id/analysis` | The whole analysis, per period and for the match |
+| GET | `/matches/:id/analysis/player/:playerId` | One athlete's involvement, delivery by delivery |
+| POST | `/matches/:id/analysis/rebuild` | Recompute the scorecard from the events |
+
+Every write to `/events` refreshes `match_performances` for the athletes involved, so career records
+follow the events without a second step. Statistics a scorer typed that events cannot produce — a
+coach rating, minutes played — are preserved.
+
+`/analysis` returns, depending on the sport:
+
+- **Cricket** — batting and bowling cards, runs per over, cumulative worm, partnerships, fall of
+  wickets, phase splits, wagon wheel, pitch map by length and line, dot-ball, boundary and control
+  percentages, head-to-head matchups
+- **Football, futsal, basketball** — shot map with coordinates, minute-by-minute timeline, scoring
+  momentum, phase activity, per-athlete contributions, attacker-versus-defender matchups
+- **Badminton, table tennis, volleyball** — rally-by-rally progression, momentum as a running lead,
+  how points were won and lost, rally-length distribution
+
+```bash
+# Record a six, and watch the athlete's career total move
+curl -s -X POST localhost:4000/api/matches/13/events \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"period_id":1,"event_type":"ball","primary_player_id":4,"secondary_player_id":9,
+       "outcome":"six","payload":{"runs_batter":6,"shot":"pull","length":"short"},"x":30,"y":70}'
+```
+
 ## Training
 `GET /training` (`sport, team, coach, type, from, to`) · `GET /training/:id` ·
 `POST /training` (attendance pre-filled from the roster) · `PUT /training/:id` ·

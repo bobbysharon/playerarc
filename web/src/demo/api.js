@@ -20,6 +20,7 @@ import {
   aggregateCareer, computeRating, computeMatchRating, validateStats, performanceScope, formatStat,
 } from './engine/stats-engine.js';
 import { ROLES, permissionsFor, can, redactPlayer } from './engine/permissions.js';
+import { analyseMatch, derivePerformances, describeEvent } from './engine/match-analysis.js';
 
 export const DEMO_PASSWORD = 'Karwan@2026';
 
@@ -1349,6 +1350,302 @@ route('DELETE', /^\/matches\/(\d+)\/performances\/(\d+)$/, (m) => {
   if (db.match_performances.length === before) fail(404, 'No performance recorded for that athlete in this match.');
   audit('delete', 'match_performances', Number(m[1]), 'Performance removed');
   return { ok: true };
+});
+
+
+/* ---- Ball-by-ball capture and analysis ---- */
+
+const eventPayload = (e) => ({ ...e, payload: parseJson(e.payload_json, {}) });
+
+function matchEvents(matchId) {
+  return filter('match_events', (e) => e.match_id === Number(matchId))
+    .map(eventPayload)
+    .sort((a, b) => a.sequence - b.sequence || a.id - b.id);
+}
+
+function matchPlayerMap(matchId) {
+  const ids = new Set();
+  filter('match_players', (mp) => mp.match_id === Number(matchId)).forEach((mp) => ids.add(mp.player_id));
+  matchEvents(matchId).forEach((e) => {
+    [e.primary_player_id, e.secondary_player_id, e.tertiary_player_id].forEach((id) => { if (id) ids.add(id); });
+  });
+  const map = new Map();
+  ids.forEach((id) => { const p = playerOf(id); if (p) map.set(id, p); });
+  return map;
+}
+
+/** Mirrors the server: rebuild match_performances from the event stream. */
+function refreshPerformances(match, sport) {
+  const events = matchEvents(match.id);
+  if (!events.length) return 0;
+  const derived = derivePerformances(sport.config, events);
+  const derivable = new Set((sport.config.events?.derive || []).map((r) => r.stat));
+  const squad = new Map(filter('match_players', (mp) => mp.match_id === match.id).map((mp) => [mp.player_id, mp.team_id]));
+
+  let updated = 0;
+  for (const [playerId, stats] of derived) {
+    const existing = find('match_performances', (p) => p.match_id === match.id && p.player_id === playerId);
+    const merged = { ...parseJson(existing?.stats_json, {}) };
+    for (const key of derivable) delete merged[key];
+    Object.assign(merged, stats);
+
+    const payload = {
+      match_id: match.id, player_id: playerId, sport_id: match.sport_id,
+      team_id: squad.get(playerId) ?? match.home_team_id ?? null,
+      stats_json: JSON.stringify(merged),
+      rating: computeMatchRating(sport.config, merged),
+      updated_at: now(),
+    };
+    if (existing) Object.assign(existing, payload);
+    else db.match_performances.push({ id: nextId('match_performances'), is_motm: 0, notes: null, created_by: session?.id ?? null, created_at: now(), ...payload });
+
+    if (!squad.has(playerId)) {
+      db.match_players.push({
+        id: nextId('match_players'), match_id: match.id, player_id: playerId,
+        team_id: match.home_team_id ?? null, is_starting: 1, is_substitute: 0,
+        is_captain: 0, is_keeper: 0,
+      });
+    }
+    updated += 1;
+  }
+  return updated;
+}
+
+route('GET', /^\/matches\/(\d+)\/periods$/, (m) => {
+  requireAuth();
+  return { periods: filter('match_periods', (p) => p.match_id === Number(m[1])).sort((a, b) => a.sequence - b.sequence) };
+});
+
+route('POST', /^\/matches\/(\d+)\/periods$/, (m, body) => {
+  requirePermission('performances.write');
+  const match = byId('matches', m[1]);
+  if (!match) fail(404, 'That match does not exist.');
+  if (find('match_periods', (p) => p.match_id === match.id && p.sequence === Number(body.sequence))) {
+    fail(409, `${body.label} already exists for this match.`);
+  }
+  const period = {
+    id: nextId('match_periods'), match_id: match.id, status: 'in_progress',
+    created_at: now(), updated_at: now(), ...body,
+  };
+  if (!db.match_periods) db.match_periods = [];
+  db.match_periods.push(period);
+  audit('create', 'match_periods', period.id, `${period.label} opened for match #${match.id}`);
+  return { period };
+});
+
+route('PUT', /^\/matches\/(\d+)\/periods\/(\d+)$/, (m, body) => {
+  requirePermission('performances.write');
+  const period = find('match_periods', (p) => p.id === Number(m[2]) && p.match_id === Number(m[1]));
+  if (!period) fail(404, 'That period does not exist.');
+  Object.assign(period, body, { updated_at: now() });
+  return { period };
+});
+
+route('GET', /^\/matches\/(\d+)\/events$/, (m, __, query) => {
+  requireAuth();
+  const match = byId('matches', m[1]);
+  if (!match) fail(404, 'That match does not exist.');
+  const sport = sportOf(match.sport_id);
+  const players = matchPlayerMap(match.id);
+  let events = matchEvents(match.id);
+  if (query.period) events = events.filter((e) => e.period_id === Number(query.period));
+  if (query.type) events = events.filter((e) => e.event_type === query.type);
+  if (query.player) {
+    const id = Number(query.player);
+    events = events.filter((e) => [e.primary_player_id, e.secondary_player_id, e.tertiary_player_id].includes(id));
+  }
+  const nm = (id) => { const p = players.get(id); return p ? (p.display_name || `${p.first_name} ${p.last_name}`) : null; };
+  return {
+    events: events.map((e) => ({
+      ...e, payload_json: undefined,
+      commentary: e.commentary || describeEvent(e, players, sport.code),
+      primary_name: nm(e.primary_player_id),
+      secondary_name: nm(e.secondary_player_id),
+      tertiary_name: nm(e.tertiary_player_id),
+    })),
+    total: events.length,
+  };
+});
+
+route('POST', /^\/matches\/(\d+)\/events$/, (m, body) => {
+  requirePermission('performances.write');
+  const match = byId('matches', m[1]);
+  if (!match) fail(404, 'That match does not exist.');
+  const sport = sportOf(match.sport_id);
+  const definition = (sport.config.events?.types || []).find((t) => t.key === body.event_type);
+  if (!definition) {
+    const known = (sport.config.events?.types || []).map((t) => t.key).join(', ');
+    fail(422, `"${body.event_type}" is not an event type for ${sport.name}. Accepted: ${known || 'none configured'}.`);
+  }
+
+  const payload = {};
+  const errors = [];
+  for (const f of definition.fields || []) {
+    if (!(f.key in (body.payload || {}))) continue;
+    const raw = body.payload[f.key];
+    if (raw === null || raw === '' || raw === undefined) continue;
+    if (f.type === 'bool') { payload[f.key] = raw === true || raw === 1 || raw === '1' || raw === 'true' ? 1 : 0; continue; }
+    if (f.type === 'select') {
+      if (f.options && !f.options.includes(String(raw))) { errors.push(`${f.label}: "${raw}" is not an accepted value`); continue; }
+      payload[f.key] = String(raw); continue;
+    }
+    if (f.type === 'text') { payload[f.key] = String(raw); continue; }
+    const n = Number(raw);
+    if (!Number.isFinite(n)) { errors.push(`${f.label} must be a number`); continue; }
+    if (f.min !== undefined && n < f.min) errors.push(`${f.label} cannot be below ${f.min}`);
+    if (f.max !== undefined && n > f.max) errors.push(`${f.label} cannot be above ${f.max}`);
+    payload[f.key] = n;
+  }
+  for (const pass of ['dismissed_player_id', 'text']) {
+    if (body.payload?.[pass] !== undefined && body.payload[pass] !== '') payload[pass] = body.payload[pass];
+  }
+  if (errors.length) fail(422, 'That event could not be recorded.', errors);
+
+  // Cricket works out its own over and ball position.
+  let over = body.over_number ?? null;
+  let ball = body.ball_in_over ?? null;
+  if (sport.config.events?.ballBased && body.event_type === 'ball' && over === null) {
+    const prior = matchEvents(match.id)
+      .filter((e) => e.event_type === 'ball' && !e.is_void && e.period_id === (body.period_id ?? null))
+      .at(-1);
+    if (!prior) { over = 0; ball = 1; } else {
+      const extra = String(prior.payload.extra_type || '').toLowerCase();
+      const counted = !['wide', 'no ball'].includes(extra);
+      const o = Math.floor(Number(prior.over_number) || 0);
+      const b = Number(prior.ball_in_over) || 0;
+      if (!counted) { over = o; ball = b; }
+      else if (b >= 6) { over = o + 1; ball = 1; }
+      else { over = o; ball = b + 1; }
+    }
+  }
+
+  const sequence = matchEvents(match.id).reduce((mx, e) => Math.max(mx, e.sequence), 0) + 1;
+  const event = {
+    id: nextId('match_events'), match_id: match.id, period_id: body.period_id ?? null,
+    sequence, event_type: body.event_type, over_number: over, ball_in_over: ball,
+    minute: body.minute ?? null, clock: body.clock ?? null,
+    team_id: body.team_id ?? match.home_team_id ?? null,
+    primary_player_id: body.primary_player_id ?? null,
+    secondary_player_id: body.secondary_player_id ?? null,
+    tertiary_player_id: body.tertiary_player_id ?? null,
+    opponent_name: body.opponent_name ?? null,
+    x: body.x ?? null, y: body.y ?? null, end_x: body.end_x ?? null, end_y: body.end_y ?? null,
+    outcome: body.outcome ?? null, payload_json: JSON.stringify(payload),
+    commentary: body.commentary ?? null, is_void: 0,
+    created_by: session.id, created_at: now(), updated_at: now(),
+  };
+  if (!db.match_events) db.match_events = [];
+  db.match_events.push(event);
+
+  const updated = refreshPerformances(match, sport);
+
+  const milestones = [];
+  const derived = derivePerformances(sport.config, matchEvents(match.id));
+  const date = String(match.scheduled_at).slice(0, 10);
+  for (const [playerId, stats] of derived) {
+    const p = playerOf(playerId);
+    if (!p) continue;
+    const mark = (title) => {
+      addTimeline({
+        player_id: playerId, event_date: date, event_type: 'milestone', title,
+        sport_id: match.sport_id, ref_table: `milestone:${match.id}:${title}`, ref_id: match.id, importance: 3,
+      });
+      milestones.push(`${p.first_name} ${p.last_name}: ${title}`);
+    };
+    if (sport.code === 'cricket') {
+      if (Number(stats.runs) >= 100) mark(`Century — ${stats.runs} runs`);
+      else if (Number(stats.runs) >= 50) mark(`Half-century — ${stats.runs} runs`);
+      if (Number(stats.wickets) >= 5) mark(`Five-wicket haul — ${stats.wickets} wickets`);
+    }
+    if ((sport.code === 'football' || sport.code === 'futsal') && Number(stats.goals) >= 3) {
+      mark(`Hat-trick — ${stats.goals} goals`);
+    }
+  }
+
+  const players = matchPlayerMap(match.id);
+  return {
+    event: { ...eventPayload(event), payload_json: undefined, commentary: event.commentary || describeEvent({ ...event, payload }, players, sport.code) },
+    performancesUpdated: updated,
+    milestones,
+  };
+});
+
+route('PUT', /^\/matches\/(\d+)\/events\/(\d+)$/, (m, body) => {
+  requirePermission('performances.write');
+  const match = byId('matches', m[1]);
+  const event = find('match_events', (e) => e.id === Number(m[2]) && e.match_id === Number(m[1]));
+  if (!event) fail(404, 'That event does not exist.');
+  const patch = { ...body };
+  if (patch.payload) { patch.payload_json = JSON.stringify(patch.payload); delete patch.payload; }
+  Object.assign(event, patch, { updated_at: now() });
+  const updated = refreshPerformances(match, sportOf(match.sport_id));
+  audit('update', 'match_events', event.id, `Event corrected in match #${match.id}`);
+  return { ok: true, performancesUpdated: updated };
+});
+
+route('DELETE', /^\/matches\/(\d+)\/events\/(\d+)$/, (m) => {
+  requirePermission('performances.write');
+  const match = byId('matches', m[1]);
+  const event = find('match_events', (e) => e.id === Number(m[2]) && e.match_id === Number(m[1]));
+  if (!event) fail(404, 'That event does not exist.');
+  const last = matchEvents(match.id).at(-1);
+  if (last && last.id === event.id) {
+    db.match_events = db.match_events.filter((e) => e.id !== event.id);
+    audit('delete', 'match_events', event.id, `Last event undone in match #${match.id}`);
+  } else {
+    event.is_void = 1;
+    audit('update', 'match_events', event.id, `Event voided in match #${match.id}`);
+  }
+  const updated = refreshPerformances(match, sportOf(match.sport_id));
+  return { ok: true, performancesUpdated: updated };
+});
+
+route('GET', /^\/matches\/(\d+)\/analysis$/, (m) => {
+  requireAuth();
+  const match = byId('matches', m[1]);
+  if (!match) fail(404, 'That match does not exist.');
+  const sport = sportOf(match.sport_id);
+  const analysis = analyseMatch(sport, matchEvents(match.id), matchPlayerMap(match.id),
+    filter('match_periods', (p) => p.match_id === match.id).sort((a, b) => a.sequence - b.sequence));
+  return {
+    match: {
+      id: match.id, sport: sport.name, sportCode: sport.code,
+      scheduledAt: match.scheduled_at, venue: match.venue, status: match.status,
+      result: match.result, resultSummary: match.result_summary,
+      homeTeam: teamName(match.home_team_id), opponent: match.opponent_name,
+    },
+    ...analysis,
+  };
+});
+
+route('GET', /^\/matches\/(\d+)\/analysis\/player\/(\d+)$/, (m) => {
+  requireAuth();
+  const match = byId('matches', m[1]);
+  const sport = sportOf(match.sport_id);
+  const playerId = Number(m[2]);
+  const players = matchPlayerMap(match.id);
+  const involved = matchEvents(match.id)
+    .filter((e) => [e.primary_player_id, e.secondary_player_id, e.tertiary_player_id].includes(playerId));
+  const analysis = analyseMatch(sport, involved, players,
+    filter('match_periods', (p) => p.match_id === match.id).sort((a, b) => a.sequence - b.sequence));
+  const perf = find('match_performances', (p) => p.match_id === match.id && p.player_id === playerId);
+  return {
+    player: players.get(playerId) || null,
+    performance: perf ? { ...perf, stats: parseJson(perf.stats_json, {}), stats_json: undefined } : null,
+    events: involved.length,
+    asPrimary: involved.filter((e) => e.primary_player_id === playerId).length,
+    asSecondary: involved.filter((e) => e.secondary_player_id === playerId).length,
+    asTertiary: involved.filter((e) => e.tertiary_player_id === playerId).length,
+    overall: analysis.overall,
+    commentary: analysis.commentary,
+  };
+});
+
+route('POST', /^\/matches\/(\d+)\/analysis\/rebuild$/, (m) => {
+  requirePermission('performances.write');
+  const match = byId('matches', m[1]);
+  const updated = refreshPerformances(match, sportOf(match.sport_id));
+  return { ok: true, performancesUpdated: updated };
 });
 
 /* ---- Training ---- */
