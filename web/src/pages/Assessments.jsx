@@ -106,11 +106,13 @@ function AssessmentForm({ open, onClose, sports, coaches, onSaved }) {
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
 
+  // Results are loaded as soon as the dialog opens, so the list of athletes is
+  // visible without having to guess that typing is required.
   useEffect(() => {
     if (!open) return undefined;
     const t = setTimeout(() => {
       api.get(`/players?q=${encodeURIComponent(q)}&pageSize=8`).then((d) => setResults(d.players)).catch(() => {});
-    }, 200);
+    }, q ? 200 : 0);
     return () => clearTimeout(t);
   }, [q, open]);
 
@@ -142,6 +144,15 @@ function AssessmentForm({ open, onClose, sports, coaches, onSaved }) {
     } catch (err) { setError(err); } finally { setBusy(false); }
   }
 
+  const scored = Object.values(scores).filter((v) => v !== '' && v !== null && v !== undefined).length;
+  const blocking = !player
+    ? 'Choose an athlete to continue.'
+    : !form.sport_id
+      ? 'Choose a sport to load its assessment criteria.'
+      : scored === 0
+        ? 'Score at least one criterion.'
+        : null;
+
   const byCategory = ['physical', 'technical', 'tactical', 'behavioural']
     .map((cat) => ({ cat, items: criteria.filter((c) => c.category === cat) }))
     .filter((g) => g.items.length);
@@ -149,26 +160,50 @@ function AssessmentForm({ open, onClose, sports, coaches, onSaved }) {
   return (
     <Modal open={open} onClose={onClose} title="Record assessment" wide>
       <form onSubmit={submit} className="space-y-4">
-        <Field label="Athlete">
-          <input className="input" value={q} onChange={(e) => { setQ(e.target.value); setPlayer(null); }} placeholder="Name or athlete ID" />
-        </Field>
-        {!player && q && (
-          <ul className="border border-line rounded-lg max-h-44 overflow-y-auto scroll-thin divide-y divide-line">
-            {results.map((p) => (
-              <li key={p.id}>
-                <button type="button" className="w-full text-left px-3 py-2 hover:bg-white/[0.04] flex items-center gap-2"
-                  onClick={() => {
-                    setPlayer(p); setQ(playerName(p));
-                    const primary = p.sports.find((s) => s.is_primary) || p.sports[0];
-                    if (primary) setForm((f) => ({ ...f, sport_id: String(primary.sport_id) }));
-                  }}>
-                  <Avatar player={p} size={26} />
-                  <span className="text-sm">{playerName(p)}</span>
-                  <span className="font-mono text-[11px] text-ink-400 ml-auto">{p.athlete_id}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
+        {player ? (
+          <Field label="Athlete">
+            <div className="flex items-center gap-2.5 rounded-lg border border-pitch/40 bg-pitch/10 px-3 py-2">
+              <Avatar player={player} size={28} />
+              <span className="min-w-0">
+                <span className="text-sm block truncate">{playerName(player)}</span>
+                <span className="font-mono text-[11px] text-ink-400">{player.athlete_id}</span>
+              </span>
+              <button
+                type="button"
+                className="btn-quiet text-xs ml-auto shrink-0"
+                onClick={() => { setPlayer(null); setQ(''); }}
+              >
+                Change
+              </button>
+            </div>
+          </Field>
+        ) : (
+          <>
+            <Field label="Athlete" hint="Tap a name below to choose who this assessment is for">
+              <input className="input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by name or athlete ID" />
+            </Field>
+            <ul className="border border-line rounded-lg max-h-44 overflow-y-auto scroll-thin divide-y divide-line">
+              {results.map((p) => (
+                <li key={p.id}>
+                  <button type="button" className="w-full text-left px-3 py-2 hover:bg-white/[0.04] flex items-center gap-2"
+                    onClick={() => {
+                      setPlayer(p); setQ('');
+                      const primary = p.sports.find((s) => s.is_primary) || p.sports[0];
+                      if (primary) setForm((f) => ({ ...f, sport_id: String(primary.sport_id) }));
+                    }}>
+                    <Avatar player={p} size={26} />
+                    <span className="text-sm">{playerName(p)}</span>
+                    <span className="font-mono text-[11px] text-ink-400 ml-auto">{p.athlete_id}</span>
+                  </button>
+                </li>
+              ))}
+              {!results.length && (
+                <li className="px-3 py-6 text-sm text-ink-400 text-center">
+                  {q ? `No athletes match “${q}”.` : 'Loading athletes…'}
+                </li>
+              )}
+            </ul>
+          </>
         )}
 
         <div className="grid sm:grid-cols-3 gap-3">
@@ -214,9 +249,10 @@ function AssessmentForm({ open, onClose, sports, coaches, onSaved }) {
         <Field label="Recommendation"><textarea className="input" rows={2} value={form.recommendation} onChange={(e) => setForm({ ...form, recommendation: e.target.value })} /></Field>
 
         <ErrorNote error={error} />
+        {blocking && <p className="text-xs text-gold text-right">{blocking}</p>}
         <div className="flex justify-end gap-2">
           <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
-          <button type="submit" className="btn-gold" disabled={busy || !player}>{busy ? 'Saving…' : 'Record assessment'}</button>
+          <button type="submit" className="btn-gold" disabled={busy || !!blocking}>{busy ? 'Saving…' : 'Record assessment'}</button>
         </div>
       </form>
     </Modal>

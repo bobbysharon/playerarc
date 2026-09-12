@@ -100,12 +100,21 @@ function SessionForm({ open, onClose, sports, teams, coaches, onSaved }) {
     intensity: 6, exercises: '', skills: '',
   });
   const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
   useEffect(() => { if (open) setError(null); }, [open]);
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
   const sportTeams = teams.filter((t) => String(t.sport_id) === String(form.sport_id));
 
+  const blocking = !form.sport_id
+    ? 'Choose a sport before logging the session.'
+    : !form.session_date
+      ? 'Set the date of the session.'
+      : null;
+
   async function submit(e) {
     e.preventDefault();
+    if (blocking) { setError({ message: blocking }); return; }
+    setBusy(true);
     setError(null);
     try {
       await api.post('/training', {
@@ -119,7 +128,7 @@ function SessionForm({ open, onClose, sports, teams, coaches, onSaved }) {
         skills: form.skills.split(',').map((s) => s.trim()).filter(Boolean),
       });
       onSaved(); onClose();
-    } catch (err) { setError(err); }
+    } catch (err) { setError(err); } finally { setBusy(false); }
   }
 
   return (
@@ -127,8 +136,8 @@ function SessionForm({ open, onClose, sports, teams, coaches, onSaved }) {
       <form onSubmit={submit} className="space-y-3">
         <div className="grid grid-cols-2 gap-3">
           <Field label="Sport">
-            <select className="input" required value={form.sport_id} onChange={(e) => setForm({ ...form, sport_id: e.target.value, team_id: '' })}>
-              <option value="">Choose</option>
+            <select className="input" value={form.sport_id} onChange={(e) => setForm({ ...form, sport_id: e.target.value, team_id: '' })}>
+              <option value="">Choose a sport</option>
               {sports.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
           </Field>
@@ -149,7 +158,7 @@ function SessionForm({ open, onClose, sports, teams, coaches, onSaved }) {
               {TYPES.map((t) => <option key={t} value={t}>{titleCase(t)}</option>)}
             </select>
           </Field>
-          <Field label="Date"><input className="input" type="date" required value={form.session_date} onChange={set('session_date')} /></Field>
+          <Field label="Date"><input className="input" type="date" value={form.session_date} onChange={set('session_date')} /></Field>
           <Field label="Start time"><input className="input" type="time" value={form.start_time} onChange={set('start_time')} /></Field>
           <Field label="Duration (minutes)"><input className="input" type="number" value={form.duration_minutes} onChange={set('duration_minutes')} /></Field>
           <Field label="Intensity (1–10)"><input className="input" type="number" min="1" max="10" value={form.intensity} onChange={set('intensity')} /></Field>
@@ -159,9 +168,10 @@ function SessionForm({ open, onClose, sports, teams, coaches, onSaved }) {
           <Field label="Skills assessed" hint="Comma separated" className="col-span-2"><input className="input" value={form.skills} onChange={set('skills')} /></Field>
         </div>
         <ErrorNote error={error} />
+        {blocking && <p className="text-xs text-gold text-right">{blocking}</p>}
         <div className="flex justify-end gap-2 pt-1">
           <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
-          <button type="submit" className="btn-gold">Log session</button>
+          <button type="submit" className="btn-gold" disabled={busy || !!blocking}>{busy ? 'Saving…' : 'Log session'}</button>
         </div>
       </form>
     </Modal>
