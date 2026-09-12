@@ -135,6 +135,10 @@ CREATE TABLE IF NOT EXISTS players (
   bio                TEXT,
   notes              TEXT,
   visibility         TEXT NOT NULL DEFAULT 'club' CHECK (visibility IN ('public','club','staff','private')),
+  -- showcase profile (cricket only, see routes/showcase.js) — a shareable,
+  -- read-only public link with no contact details and no video
+  showcase_enabled   INTEGER NOT NULL DEFAULT 0,
+  showcase_token     TEXT UNIQUE,
   is_demo            INTEGER NOT NULL DEFAULT 0,
   created_by         INTEGER REFERENCES users(id),
   created_at         TEXT NOT NULL DEFAULT (datetime('now')),
@@ -480,12 +484,107 @@ CREATE INDEX IF NOT EXISTS idx_events_secondary ON match_events(secondary_player
 CREATE INDEX IF NOT EXISTS idx_events_type ON match_events(match_id, event_type);
 
 -- ---------------------------------------------------------------------
+-- 5b. CRICKET ACADEMY MANAGEMENT (digital groups, drill library)
+-- Cricket-only in the UI/API; the schema is sport-scoped like everything
+-- else so it costs nothing to keep generic.
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS player_groups (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  sport_id    INTEGER NOT NULL REFERENCES sports(id) ON DELETE CASCADE,
+  name        TEXT NOT NULL,
+  description TEXT,
+  color       TEXT,
+  is_active   INTEGER NOT NULL DEFAULT 1,
+  is_demo     INTEGER NOT NULL DEFAULT 0,
+  created_by  INTEGER REFERENCES users(id),
+  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_groups_sport ON player_groups(sport_id);
+
+CREATE TABLE IF NOT EXISTS player_group_members (
+  group_id  INTEGER NOT NULL REFERENCES player_groups(id) ON DELETE CASCADE,
+  player_id INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+  added_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (group_id, player_id)
+);
+
+CREATE TABLE IF NOT EXISTS drills (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  sport_id         INTEGER NOT NULL REFERENCES sports(id) ON DELETE CASCADE,
+  name             TEXT NOT NULL,
+  skill_group      TEXT NOT NULL,   -- e.g. batting | bowling | fielding | fitness
+  age_groups       TEXT,            -- comma-separated, e.g. "U12,U14"
+  equipment        TEXT,
+  duration_minutes INTEGER,
+  description      TEXT,
+  coaching_points  TEXT,
+  is_active        INTEGER NOT NULL DEFAULT 1,
+  is_demo          INTEGER NOT NULL DEFAULT 0,
+  created_by       INTEGER REFERENCES users(id),
+  created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at       TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_drills_sport ON drills(sport_id, skill_group);
+
+-- ---------------------------------------------------------------------
+-- 5c. AGE-GROUP BENCHMARKS
+-- Reference thresholds per sport/age-group/metric, compared against a
+-- player's own career figures. Cricket-only in the UI for now.
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS sport_benchmarks (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  sport_id        INTEGER NOT NULL REFERENCES sports(id) ON DELETE CASCADE,
+  age_group       TEXT NOT NULL,
+  metric_key      TEXT NOT NULL,     -- a career stat key from the sport's config, e.g. "batting_average"
+  benchmark_value REAL NOT NULL,
+  level           TEXT NOT NULL DEFAULT 'target' CHECK (level IN ('emerging','developing','target','elite')),
+  notes           TEXT,
+  is_demo         INTEGER NOT NULL DEFAULT 0,
+  created_by      INTEGER REFERENCES users(id),
+  created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (sport_id, age_group, metric_key, level)
+);
+CREATE INDEX IF NOT EXISTS idx_benchmarks_sport ON sport_benchmarks(sport_id, age_group);
+
+-- ---------------------------------------------------------------------
+-- 5d. MESSAGING
+-- Direct messages to a squad, a digital group, or an individual athlete.
+-- Cricket-only for now (enforced in routes/messages.js).
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS messages (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  sport_id    INTEGER NOT NULL REFERENCES sports(id) ON DELETE CASCADE,
+  sender_id   INTEGER NOT NULL REFERENCES users(id),
+  scope_type  TEXT NOT NULL CHECK (scope_type IN ('team','group','player')),
+  team_id     INTEGER REFERENCES teams(id) ON DELETE CASCADE,
+  group_id    INTEGER REFERENCES player_groups(id) ON DELETE CASCADE,
+  player_id   INTEGER REFERENCES players(id) ON DELETE CASCADE,
+  subject     TEXT,
+  body        TEXT NOT NULL,
+  is_demo     INTEGER NOT NULL DEFAULT 0,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_messages_sport ON messages(sport_id, created_at);
+
+CREATE TABLE IF NOT EXISTS message_recipients (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+  player_id  INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+  read_at    TEXT,
+  UNIQUE (message_id, player_id)
+);
+CREATE INDEX IF NOT EXISTS idx_msg_recipients_player ON message_recipients(player_id);
+
+-- ---------------------------------------------------------------------
 -- 6. TRAINING
 -- ---------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS training_sessions (
   id                    INTEGER PRIMARY KEY AUTOINCREMENT,
   sport_id              INTEGER NOT NULL REFERENCES sports(id) ON DELETE CASCADE,
   team_id               INTEGER REFERENCES teams(id) ON DELETE SET NULL,
+  group_id              INTEGER REFERENCES player_groups(id) ON DELETE SET NULL,
   coach_id              INTEGER REFERENCES coaches(id) ON DELETE SET NULL,
   title                 TEXT,
   session_date          TEXT NOT NULL,
@@ -506,6 +605,8 @@ CREATE TABLE IF NOT EXISTS training_sessions (
   updated_at            TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_train_team_date ON training_sessions(team_id, session_date);
+-- idx_train_group_date is created in migrate.js, after group_id is guaranteed to
+-- exist on both fresh installs and upgraded (pre-existing) databases.
 
 CREATE TABLE IF NOT EXISTS training_attendance (
   id                    INTEGER PRIMARY KEY AUTOINCREMENT,

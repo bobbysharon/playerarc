@@ -32,6 +32,7 @@ complete sporting journey from one place?*
 | **Reports** | Player, team, tournament, sport and coach reports, with CSV, Excel and PDF export |
 | **User manager** | Accounts, roles, data scopes, staff and athlete links, passwords — super admin only |
 | **Administration** | Audit log, settings, demo data management |
+| **Cricket coaching add-ons** *(cricket only)* | Delivery-level swing/seam deviation tracking, age-group benchmarks compared against real career stats, a reusable drill library, "digital groups" for training outside full squads, squad/group/player messaging, and a public no-video showcase profile link. See `docs/DATA-MODEL.md#cricket-only-tables-ludimos-style-features`. Not part of the GitHub Pages demo — the static demo dataset/engine wasn't extended to cover these. |
 
 ---
 
@@ -103,7 +104,7 @@ Password for all: `Karwan@2026`
 
 | Email | Role | What they see |
 | --- | --- | --- |
-| `admin@karwansportsclub.com` | Super Admin (Bobby Sharon) | Everything, including users, settings and the audit log |
+| `admin@playerarc.local` | Super Admin (Bobby Sharon) | Everything, including users, settings and the audit log. Its own account can only have its password changed — role, email and name are locked. It also cannot log training sessions, assessments or achievements/awards; that stays with coaches and sport admins |
 | `director@karwansportsclub.com` | Sports Director | All sports, athletes, teams, competitions and performance data |
 | `cricket.admin@karwansportsclub.com` | Sport Administrator | Cricket only |
 | `coach.cricket@karwansportsclub.com` | Coach | Only the cricket teams assigned to them; contact details are hidden |
@@ -150,7 +151,7 @@ native dependencies.
 playerarc/
 ├── server/                     Node.js + Express API, SQLite via better-sqlite3
 │   └── src/
-│       ├── db/schema.sql       33 tables — the full relational model
+│       ├── db/schema.sql       42 tables — the full relational model
 │       ├── db/seed.js          Sport definitions, criteria, and the demo club
 │       ├── lib/
 │       │   ├── sport-configs.js   Every sport defined as data, not code
@@ -160,14 +161,15 @@ playerarc/
 │       │   ├── formula.js         Safe evaluator for configured formulas
 │       │   ├── permissions.js     Role matrix and field redaction
 │       │   ├── timeline.js        Career timeline and milestone detection
-│       │   └── repo.js            Shared career/statistics queries
+│       │   ├── repo.js            Shared career/statistics queries
+│       │   └── cricket-scope.js   Cricket-only gate for the Ludimos-style additions
 │       ├── middleware/         auth · scope · audit · errors
-│       └── routes/             12 route modules
+│       └── routes/             18 route modules (incl. cricket-only benchmarks, drills, groups, messages, showcase)
 ├── web/                        React 18 + Vite + Tailwind
 │   └── src/
 │       ├── components/ui.jsx   Shared interface: tables, charts, career spine
 │       ├── lib/                API client, auth context, formatting
-│       ├── pages/              20 screens
+│       ├── pages/              25 screens (incl. Messages and the public Showcase page)
 │       └── demo/               Browser-only backend for the static build
 │           ├── api.js          Answers the same calls the server does
 │           ├── dataset.json    Exported from the seeded database

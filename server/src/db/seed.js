@@ -139,7 +139,7 @@ async function main() {
   `);
 
   const accounts = [
-    ['admin@karwansportsclub.com', 'Bobby Sharon', 'super_admin', 0],
+    ['admin@playerarc.local', 'Bobby Sharon', 'super_admin', 0],
     ['director@karwansportsclub.com', 'Nadia Farooqui', 'sports_director', 1],
     ['cricket.admin@karwansportsclub.com', 'Imran Qureshi', 'sport_admin', 1],
     ['coach.cricket@karwansportsclub.com', 'Yusuf Baig', 'coach', 1],
@@ -217,7 +217,7 @@ async function main() {
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?)
   `);
 
-  const adminId = userId('admin@karwansportsclub.com');
+  const adminId = userId('admin@playerarc.local');
   const players = [];
   const usedNames = new Set();
 
@@ -727,7 +727,7 @@ async function main() {
           JSON.stringify(SKILLS[sport]),
           'Good intensity throughout. Standards held in the final block.',
           `Continue work on ${pick(SKILLS[sport]).toLowerCase()}.`,
-          int(4, 9), userId('admin@karwansportsclub.com'),
+          int(4, 9), userId('admin@playerarc.local'),
         );
         sessionCount += 1;
         roster.forEach((r) => {
@@ -789,7 +789,7 @@ async function main() {
                 'Ready for consideration in the age group above.',
                 'Focus block on tactical decision making next quarter.']),
           daysAgo(300 - cycle * 90 - 90),
-          userId('admin@karwansportsclub.com'),
+          userId('admin@playerarc.local'),
         );
         rows.forEach((r) => scoreStmt.run(info.lastInsertRowid, r.criteriaId, r.score, null));
         timeline.addEvent({
@@ -827,7 +827,7 @@ async function main() {
     const info = awardStmt.run(candidates.player_id, title, category,
       category === 'representative' ? 'district' : 'club',
       sportId(sport), tournament ? tourId(tournament) : null, null, date,
-      `Awarded at ${tournament || config.club.name}.`, userId('admin@karwansportsclub.com'));
+      `Awarded at ${tournament || config.club.name}.`, userId('admin@playerarc.local'));
     timeline.addEvent({
       playerId: candidates.player_id, date, type: 'achievement', title,
       sportId: sportId(sport), refTable: 'achievements', refId: info.lastInsertRowid, importance: 3,
@@ -1231,7 +1231,7 @@ async function main() {
   console.log('\n[seed] demo club ready');
   console.table(counts);
   console.log('\n  Sign in with any of these (password: Karwan@2026)');
-  console.log('  admin@karwansportsclub.com            Super Admin');
+  console.log('  admin@playerarc.local            Super Admin');
   console.log('  director@karwansportsclub.com         Sports Director');
   console.log('  cricket.admin@karwansportsclub.com    Sport Administrator (cricket only)');
   console.log('  coach.cricket@karwansportsclub.com    Coach (cricket teams only)');
@@ -1244,8 +1244,8 @@ async function seedAdminOnly() {
   const hash = await bcrypt.hash('Karwan@2026', 10);
   const role = db.prepare(`SELECT id FROM roles WHERE key = 'super_admin'`).get();
   db.prepare(`INSERT OR IGNORE INTO users (email, password_hash, full_name, role_id, status) VALUES (?,?,?,?, 'active')`)
-    .run('admin@karwansportsclub.com', hash, 'Bobby Sharon', role.id);
-  console.log('[seed] administrator account created: admin@karwansportsclub.com / Karwan@2026');
+    .run('admin@playerarc.local', hash, 'Bobby Sharon', role.id);
+  console.log('[seed] administrator account created: admin@playerarc.local / Karwan@2026');
 }
 
 main().catch((err) => {

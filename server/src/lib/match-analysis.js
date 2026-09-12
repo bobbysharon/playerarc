@@ -211,10 +211,15 @@ function analyseCricket(events, players, period) {
           opposition: typeof bowlerId !== 'number',
           name: nameOf(players, e.secondary_player_id, e.opponent_name), balls: 0, runs: 0,
           wickets: 0, dots: 0, fours: 0, sixes: 0, wides: 0, noBalls: 0, maidens: 0, overs: new Set(),
+          deviationSum: 0, deviationCount: 0,
         });
       }
       const bw = bowlers.get(bowlerId);
       if (legal) bw.balls += 1;
+      if (p.deviation_deg !== undefined && p.deviation_deg !== null && p.deviation_deg !== '') {
+        bw.deviationSum += num(p.deviation_deg);
+        bw.deviationCount += 1;
+      }
       bw.runs += num(p.runs_batter) + (isWide || isNoBall ? num(p.extras) : 0);
       if (ballRuns === 0 && legal) bw.dots += 1;
       if (num(p.runs_batter) === 4) bw.fours += 1;
@@ -254,6 +259,7 @@ function analyseCricket(events, players, period) {
       pitchMap.push({
         length: p.length || null, line: p.line || null, runs: ballRuns,
         wicket: truthy(p.wicket), bowler: nameOf(players, e.secondary_player_id, e.opponent_name), speed: num(p.speed_kph) || null,
+        deviation: num(p.deviation_deg) || null, deliveryType: p.delivery_type || null, beaten: truthy(p.beaten), edge: truthy(p.edge),
       });
     }
 
@@ -398,6 +404,7 @@ function analyseCricket(events, players, period) {
       economy: b.balls ? round((b.runs / b.balls) * 6) : 0,
       strikeRate: b.wickets ? round(b.balls / b.wickets, 1) : null,
       dotPercent: b.balls ? round((b.dots / b.balls) * 100, 1) : 0,
+      avgDeviation: b.deviationCount ? round(b.deviationSum / b.deviationCount, 1) : null,
     })).sort((a, b) => b.wickets - a.wickets || a.economy - b.economy),
     overByOver: overList,
     worm,

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { api } from '../lib/api';
+import { api, DEMO_MODE } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import {
   Spinner, ErrorNote, Avatar, StatusChip, Section, Tabs, StatTile, Modal, Field,
@@ -200,6 +200,10 @@ export default function PlayerProfile() {
                     </ul>
                   )}
               </Section>
+
+              {careers?.some((c) => c.sport.code === 'cricket') && !DEMO_MODE && (
+                <CricketShowcaseCard playerId={id} player={p} canWrite={can('players.write')} onChanged={load} />
+              )}
             </div>
           </div>
         )}
@@ -906,5 +910,89 @@ function AssignStaff({ open, onClose, playerId, coaches, sports, onSaved }) {
         </div>
       </form>
     </Modal>
+  );
+}
+
+/**
+ * Ludimos-style age-group benchmark comparison plus the public showcase
+ * link toggle. Cricket only — the section only renders when the player is
+ * registered for cricket (see the call site above).
+ */
+function CricketShowcaseCard({ playerId, player, canWrite, onChanged }) {
+  const [comparison, setComparison] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    api.get(`/benchmarks/players/${playerId}`).then(setComparison).catch(() => setComparison(null));
+  }, [playerId]);
+
+  async function toggleShowcase(enabled) {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.patch(`/players/${playerId}/showcase`, { enabled });
+      onChanged();
+    } catch (err) { setError(err); } finally { setBusy(false); }
+  }
+
+  function copyLink() {
+    const url = `${window.location.origin}/showcase/${player.showcase_token}`;
+    navigator.clipboard?.writeText(url);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }
+
+  return (
+    <Section title="Cricket showcase" subtitle="Ludimos-style age-group benchmarks and a shareable profile">
+      <div className="p-4 space-y-4">
+        {comparison?.ageGroup ? (
+          comparison.benchmarks.length > 0 ? (
+            <div className="space-y-2">
+              <p className="text-xs text-ink-400">Age group: {comparison.ageGroup}</p>
+              {comparison.benchmarks.map((b) => {
+                const target = b.levels.target?.value ?? Object.values(b.levels)[0]?.value;
+                const hit = b.actual != null && target != null && (b.higherIsBetter ? b.actual >= target : b.actual <= target);
+                return (
+                  <div key={b.metric_key} className="flex items-center justify-between text-sm border-b border-line/60 pb-2 last:border-0">
+                    <span>{b.label}</span>
+                    <span className={hit ? 'text-pitch font-mono' : 'text-ink-400 font-mono'}>
+                      {b.actual ?? '—'} <span className="text-[10px] text-ink-400">/ target {target ?? '—'}</span>
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="text-sm text-ink-400">No benchmarks set for {comparison.ageGroup} yet.</p>
+          )
+        ) : (
+          <p className="text-sm text-ink-400">Assign this player to a team to compare against their age group's benchmarks.</p>
+        )}
+
+        {canWrite && (
+          <div className="pt-3 border-t border-line">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium">Showcase profile</p>
+                <p className="text-xs text-ink-400">A public, read-only link — no contact details, no video.</p>
+              </div>
+              <button type="button" className={player.showcase_enabled ? 'btn-ghost' : 'btn-gold'} disabled={busy}
+                onClick={() => toggleShowcase(!player.showcase_enabled)}>
+                {player.showcase_enabled ? 'Disable' : 'Enable'}
+              </button>
+            </div>
+            {player.showcase_enabled && player.showcase_token && (
+              <div className="mt-2 flex items-center gap-2">
+                <input readOnly className="input text-xs" value={`${window.location.origin}/showcase/${player.showcase_token}`} />
+                <button type="button" className="btn-quiet text-xs whitespace-nowrap" onClick={copyLink}>{copied ? 'Copied!' : 'Copy link'}</button>
+              </div>
+            )}
+            <ErrorNote error={error} />
+          </div>
+        )}
+      </div>
+    </Section>
   );
 }

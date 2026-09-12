@@ -70,6 +70,7 @@ const CRICKET_EVENTS = {
             'off break', 'leg break', 'googly', 'arm ball', 'carrom ball', 'doosra'],
         },
         { key: 'speed_kph', label: 'Speed (kph)', type: 'dec', min: 40, max: 170 },
+        { key: 'deviation_deg', label: 'Deviation (°)', type: 'dec', min: 0, max: 10, help: 'Lateral movement off the pitch or through the air' },
         { key: 'control', label: 'In control', type: 'bool', default: 1, help: 'Did the batter middle it?' },
         { key: 'beaten', label: 'Beaten', type: 'bool' },
         { key: 'edge', label: 'Edged', type: 'bool' },

@@ -7,7 +7,7 @@ import {
 import {
   LayoutDashboard, Users, Shield, Megaphone, Trophy, Swords, Dumbbell, ClipboardCheck,
   Award, BarChart3, FileText, Shapes, Settings as SettingsIcon, Search as SearchIcon,
-  LogOut, Menu, X, ChevronRight, UserCog,
+  LogOut, Menu, X, ChevronRight, UserCog, MessageCircle,
 } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 import { api } from '../lib/api';
@@ -168,9 +168,9 @@ export function Modal({ open, onClose, title, children, wide = false }) {
 
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-6">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
-      <div className={`relative bg-surface border border-line rounded-t-2xl sm:rounded-xl shadow-lift w-full ${wide ? 'max-w-4xl' : 'max-w-lg'} max-h-[92vh] flex flex-col animate-fade-up`}>
+      <div className={`relative bg-surface border border-line rounded-xl shadow-lift w-full ${wide ? 'max-w-4xl' : 'max-w-lg'} max-h-[92vh] flex flex-col animate-fade-up`}>
         <header className="flex items-center justify-between px-5 py-3.5 border-b border-line bg-white/[0.02]">
           <h2 className="font-display text-xl flex items-center gap-2.5">
             <span className="h-4 w-1 rounded-full bg-gold-grad" />
@@ -513,6 +513,7 @@ const NAV = [
     { to: '/training', label: 'Training', icon: Dumbbell, permission: 'training.read' },
     { to: '/assessments', label: 'Assessments', icon: ClipboardCheck, permission: 'assessments.read' },
     { to: '/achievements', label: 'Achievements', icon: Award, permission: 'achievements.read' },
+    { to: '/messages', label: 'Messages', icon: MessageCircle, permission: 'messages.read' },
   ] },
   { group: 'Analysis', items: [
     { to: '/rankings', label: 'Rankings', icon: BarChart3, permission: 'rankings.read' },

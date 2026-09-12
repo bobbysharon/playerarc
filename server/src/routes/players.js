@@ -546,4 +546,32 @@ router.put('/:id/staff/:assignmentId', requirePermission('players.write'), async
   res.json({ ok: true });
 }));
 
+/* ------------------------------------------------------------------ */
+/* Showcase profile — a public, read-only, video-free share link        */
+/* Cricket only for now: see routes/showcase.js for the public reader. */
+/* ------------------------------------------------------------------ */
+router.patch('/:id/showcase', requirePermission('players.write'), asyncHandler(async (req, res) => {
+  const player = db.prepare('SELECT * FROM players WHERE id = ?').get(req.params.id);
+  if (!player) throw new ApiError(404, 'That player does not exist.');
+  guard(req, player.id);
+
+  const cricketSport = db.prepare("SELECT id FROM sports WHERE code = 'cricket'").get();
+  const playsCricket = cricketSport && db.prepare('SELECT 1 FROM player_sports WHERE player_id = ? AND sport_id = ?').get(player.id, cricketSport.id);
+  if (!playsCricket) throw new ApiError(422, 'A showcase profile is currently available for cricket players only.');
+
+  const schema = z.object({ enabled: z.coerce.boolean(), regenerate: z.coerce.boolean().optional() });
+  const body = schema.parse(req.body);
+
+  let token = player.showcase_token;
+  if (body.enabled && (!token || body.regenerate)) {
+    token = require('crypto').randomBytes(16).toString('hex');
+  }
+  if (!body.enabled) token = body.regenerate ? null : token;
+
+  db.prepare(`UPDATE players SET showcase_enabled = ?, showcase_token = ?, updated_at = datetime('now') WHERE id = ?`)
+    .run(body.enabled ? 1 : 0, token, player.id);
+  audit(req, { action: 'update', entity: 'players', entityId: player.id, summary: `Showcase profile ${body.enabled ? 'enabled' : 'disabled'} for ${player.athlete_id}` });
+  res.json({ showcase_enabled: body.enabled ? 1 : 0, showcase_token: body.enabled ? token : null });
+}));
+
 module.exports = router;

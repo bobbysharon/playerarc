@@ -148,7 +148,7 @@ so the API declines to produce a meaningless table.
 ```bash
 TOKEN=$(curl -s -X POST localhost:4000/api/auth/login \
   -H 'Content-Type: application/json' \
-  -d '{"email":"admin@karwansportsclub.com","password":"Karwan@2026"}' | jq -r .token)
+  -d '{"email":"admin@playerarc.local","password":"Karwan@2026"}' | jq -r .token)
 
 # An athlete's complete career, every sport
 curl -s localhost:4000/api/players/1/stats -H "Authorization: Bearer $TOKEN" | jq

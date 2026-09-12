@@ -19,6 +19,8 @@ import Training from './pages/Training';
 import TrainingDetail from './pages/TrainingDetail';
 import Assessments from './pages/Assessments';
 import Achievements from './pages/Achievements';
+import Messages from './pages/Messages';
+import Showcase from './pages/Showcase';
 import Rankings from './pages/Rankings';
 import Reports from './pages/Reports';
 import Sports from './pages/Sports';
@@ -40,6 +42,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+      <Route path="/showcase/:token" element={<Showcase />} />
       <Route path="/" element={<Protected><Dashboard /></Protected>} />
       <Route path="/players" element={<Protected><Players /></Protected>} />
       <Route path="/players/:id" element={<Protected><PlayerProfile /></Protected>} />
@@ -57,6 +60,7 @@ export default function App() {
       <Route path="/training/:id" element={<Protected><TrainingDetail /></Protected>} />
       <Route path="/assessments" element={<Protected><Assessments /></Protected>} />
       <Route path="/achievements" element={<Protected><Achievements /></Protected>} />
+      <Route path="/messages" element={<Protected><Messages /></Protected>} />
       <Route path="/rankings" element={<Protected><Rankings /></Protected>} />
       <Route path="/reports" element={<Protected><Reports /></Protected>} />
       <Route path="/sports" element={<Protected><Sports /></Protected>} />

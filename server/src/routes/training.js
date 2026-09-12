@@ -6,6 +6,7 @@ const { requireAuth, requirePermission } = require('../middleware/auth');
 const { audit } = require('../middleware/audit');
 const { asyncHandler, ApiError } = require('../middleware/error');
 const { canAccessTeam, allowedTeamIds, scopeClause } = require('../middleware/scope');
+const { requireCricketSport } = require('../lib/cricket-scope');
 
 const router = express.Router();
 
@@ -14,6 +15,7 @@ router.get('/', requireAuth, (req, res) => {
   const params = [];
   if (req.query.sport) { where.push('ts.sport_id = ?'); params.push(Number(req.query.sport)); }
   if (req.query.team) { where.push('ts.team_id = ?'); params.push(Number(req.query.team)); }
+  if (req.query.group) { where.push('ts.group_id = ?'); params.push(Number(req.query.group)); }
   if (req.query.coach) { where.push('ts.coach_id = ?'); params.push(Number(req.query.coach)); }
   if (req.query.type) { where.push('ts.training_type = ?'); params.push(req.query.type); }
   if (req.query.from) { where.push('ts.session_date >= ?'); params.push(req.query.from); }
@@ -21,12 +23,13 @@ router.get('/', requireAuth, (req, res) => {
 
   const scope = scopeClause('ts.team_id', allowedTeamIds(req.user));
   const sessions = db
-    .prepare(`SELECT ts.*, s.name AS sport_name, s.color, t.name AS team_name, c.full_name AS coach_name,
+    .prepare(`SELECT ts.*, s.name AS sport_name, s.color, t.name AS team_name, g.name AS group_name, c.full_name AS coach_name,
                      (SELECT COUNT(*) FROM training_attendance ta WHERE ta.session_id = ts.id) AS invited,
                      (SELECT COUNT(*) FROM training_attendance ta WHERE ta.session_id = ts.id AND ta.status IN ('present','late')) AS attended
               FROM training_sessions ts
               JOIN sports s ON s.id = ts.sport_id
               LEFT JOIN teams t ON t.id = ts.team_id
+              LEFT JOIN player_groups g ON g.id = ts.group_id
               LEFT JOIN coaches c ON c.id = ts.coach_id
               WHERE ${where.join(' AND ')}${scope.sql}
               ORDER BY ts.session_date DESC, ts.start_time DESC LIMIT ?`)
@@ -36,9 +39,10 @@ router.get('/', requireAuth, (req, res) => {
 
 router.get('/:id', requireAuth, (req, res) => {
   const row = db
-    .prepare(`SELECT ts.*, s.name AS sport_name, s.code AS sport_code, t.name AS team_name, c.full_name AS coach_name
+    .prepare(`SELECT ts.*, s.name AS sport_name, s.code AS sport_code, t.name AS team_name, g.name AS group_name, c.full_name AS coach_name
               FROM training_sessions ts JOIN sports s ON s.id = ts.sport_id
-              LEFT JOIN teams t ON t.id = ts.team_id LEFT JOIN coaches c ON c.id = ts.coach_id WHERE ts.id = ?`)
+              LEFT JOIN teams t ON t.id = ts.team_id LEFT JOIN player_groups g ON g.id = ts.group_id
+              LEFT JOIN coaches c ON c.id = ts.coach_id WHERE ts.id = ?`)
     .get(req.params.id);
   if (!row) throw new ApiError(404, 'That training session does not exist.');
   const attendance = db
@@ -55,6 +59,7 @@ router.get('/:id', requireAuth, (req, res) => {
 const sessionSchema = z.object({
   sport_id: z.coerce.number().int(),
   team_id: z.coerce.number().int().optional().nullable(),
+  group_id: z.coerce.number().int().optional().nullable(),
   coach_id: z.coerce.number().int().optional().nullable(),
   title: z.string().optional().nullable(),
   session_date: z.string().min(8),
@@ -73,23 +78,28 @@ const sessionSchema = z.object({
 router.post('/', requirePermission('training.write'), asyncHandler(async (req, res) => {
   const body = sessionSchema.parse(req.body);
   if (body.team_id && !canAccessTeam(req.user, body.team_id)) throw new ApiError(403, 'That team is not assigned to you.');
+  if (body.group_id) requireCricketSport(body.sport_id); // digital groups are a cricket-only concept for now
   if (new Date(body.session_date) > new Date(Date.now() + 365 * 864e5)) throw new ApiError(422, 'That date is too far in the future.');
 
   const info = db
-    .prepare(`INSERT INTO training_sessions (sport_id, team_id, coach_id, title, session_date, start_time, duration_minutes,
+    .prepare(`INSERT INTO training_sessions (sport_id, team_id, group_id, coach_id, title, session_date, start_time, duration_minutes,
               training_type, location, objectives, exercises_json, skills_json, coach_notes, areas_for_improvement, intensity, created_by)
-              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .run(body.sport_id, body.team_id ?? null, body.coach_id ?? req.user.coachId ?? null, body.title ?? null,
+              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .run(body.sport_id, body.team_id ?? null, body.group_id ?? null, body.coach_id ?? req.user.coachId ?? null, body.title ?? null,
          body.session_date, body.start_time ?? null, body.duration_minutes, body.training_type, body.location ?? null,
          body.objectives ?? null, JSON.stringify(body.exercises || []), JSON.stringify(body.skills || []),
          body.coach_notes ?? null, body.areas_for_improvement ?? null, body.intensity ?? null, req.user.id);
 
   const sessionId = info.lastInsertRowid;
 
-  // Pre-fill the attendance sheet from the current roster so a coach only has
-  // to mark the exceptions.
-  if (body.team_id) {
-    const roster = db.prepare('SELECT player_id FROM team_memberships WHERE team_id = ? AND end_date IS NULL').all(body.team_id);
+  // Pre-fill the attendance sheet from the roster (team) or digital group so
+  // a coach only has to mark the exceptions.
+  const roster = body.team_id
+    ? db.prepare('SELECT player_id FROM team_memberships WHERE team_id = ? AND end_date IS NULL').all(body.team_id)
+    : body.group_id
+      ? db.prepare('SELECT player_id FROM player_group_members WHERE group_id = ?').all(body.group_id)
+      : [];
+  if (roster.length) {
     const stmt = db.prepare('INSERT OR IGNORE INTO training_attendance (session_id, player_id, status) VALUES (?,?,?)');
     tx(() => roster.forEach((r) => stmt.run(sessionId, r.player_id, 'present')));
   }

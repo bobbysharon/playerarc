@@ -70,8 +70,21 @@ router.post('/users', adminOnly, asyncHandler(async (req, res) => {
 }));
 
 router.put('/users/:id', adminOnly, asyncHandler(async (req, res) => {
-  const before = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
+  const before = db.prepare('SELECT u.*, r.key AS role FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = ?').get(req.params.id);
   if (!before) throw new ApiError(404, 'That user does not exist.');
+  // The Super Admin account is the platform's own administrator record —
+  // its identity and role are fixed. Only its password may ever change,
+  // and only through the dedicated password endpoint below.
+  // (Checked against the raw request body, not the parsed one: zod's
+  // schema defaults — e.g. status: 'active' — would otherwise look like
+  // an attempted change even when the caller only sent a password.)
+  if (before.role === 'super_admin') {
+    const attemptedOtherFields = Object.keys(req.body || {}).some((k) => k !== 'password');
+    if (attemptedOtherFields) {
+      throw new ApiError(403, 'The administrator account cannot be edited. Only its password can be changed.');
+    }
+  }
+
   const body = userSchema.partial().parse(req.body);
 
   const sets = [];
