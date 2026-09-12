@@ -657,7 +657,10 @@ async function main() {
     }
   }
 
-  // Upcoming fixtures so the dashboard has something ahead of it.
+  // Upcoming fixtures so the dashboard has something ahead of it. The cricket
+  // one gets its starting XI set immediately, so opening it and hitting
+  // "Score" drops straight into ball-by-ball recording with real names in
+  // the striker / bowler / fielder pickers — nothing else to set up first.
   tx(() => {
     for (const [team, sport, tournament] of [
       ['Karwan Cricket Senior XI', 'cricket', 'Karwan Cricket Championship 2026–27'],
@@ -665,9 +668,20 @@ async function main() {
       ['Karwan Hoops Senior', 'basketball', null],
     ]) {
       try {
-        matchStmt.run(sportId(sport), tournament ? tourId(tournament) : null, currentSeason, 'M1', 'League',
+        const info = matchStmt.run(sportId(sport), tournament ? tourId(tournament) : null, currentSeason, 'M1', 'League',
           'team', null, `${daysAhead(int(3, 25))}T16:00:00`, pick(VENUES), teamId(team),
           pick(OPPONENTS[sport]), 1, 'scheduled', null, null, null, null, null, null, statsUserId);
+
+        if (sport === 'cricket' && info.lastInsertRowid) {
+          const roster = rosterOf(team).slice(0, 11);
+          roster.forEach((r, i) => {
+            lineupStmt.run(
+              info.lastInsertRowid, r.player_id, teamId(team), 1, 0,
+              i === 0 ? 1 : 0, r.position === 'wicket_keeper' ? 1 : 0,
+              r.position || null, r.jersey_number || null, i + 1, null,
+            );
+          });
+        }
       } catch { /* duplicate fixture */ }
     }
   });
@@ -833,6 +847,121 @@ async function main() {
       sportId: sportId(sport), refTable: 'achievements', refId: info.lastInsertRowid, importance: 3,
     });
   }));
+
+  /* ---- Cricket-only Ludimos-style features ---------------------------
+   * Benchmarks, drill library, digital groups, messages and showcase
+   * profiles — seeded so these panels have something to show the first
+   * time anyone opens them, rather than an empty state. */
+  const cricketSportId = sportId('cricket');
+  const cricketSquad = rosterOf('Karwan Cricket Senior XI');
+  const cricketU16 = rosterOf('Karwan Cricket U16');
+  const cricketAdminId = userId('cricket.admin@karwansportsclub.com');
+  const cricketCoachId = userId('coach.cricket@karwansportsclub.com');
+
+  // Age-group benchmarks
+  const benchStmt = db.prepare(`
+    INSERT OR IGNORE INTO sport_benchmarks (sport_id, age_group, metric_key, benchmark_value, level, notes, is_demo, created_by)
+    VALUES (?,?,?,?,?,?,1,?)
+  `);
+  tx(() => {
+    const rows = [
+      ['U18', 'batting_average', 22, 'developing'], ['U18', 'batting_average', 32, 'target'], ['U18', 'batting_average', 45, 'elite'],
+      ['U18', 'bowling_average', 30, 'target'], ['U18', 'bowling_average', 22, 'elite'],
+      ['U18', 'strike_rate', 75, 'target'], ['U18', 'strike_rate', 95, 'elite'],
+      ['U18', 'economy', 6, 'target'], ['U18', 'economy', 4.8, 'elite'],
+      ['Senior', 'batting_average', 30, 'developing'], ['Senior', 'batting_average', 40, 'target'], ['Senior', 'batting_average', 55, 'elite'],
+      ['Senior', 'bowling_average', 26, 'target'], ['Senior', 'bowling_average', 19, 'elite'],
+      ['Senior', 'strike_rate', 85, 'target'], ['Senior', 'strike_rate', 115, 'elite'],
+      ['Senior', 'economy', 5, 'target'], ['Senior', 'economy', 3.9, 'elite'],
+    ];
+    rows.forEach(([ageGroup, metric, value, level]) => {
+      benchStmt.run(cricketSportId, ageGroup, metric,
+        value, level, `${level === 'elite' ? 'Elite' : level === 'target' ? 'Target' : 'Developing'} benchmark for ${ageGroup} ${metric.replace('_', ' ')}.`,
+        cricketAdminId);
+    });
+  });
+  console.log('[seed] cricket age-group benchmarks seeded');
+
+  // Drill library
+  const drillStmt = db.prepare(`
+    INSERT INTO drills (sport_id, name, skill_group, age_groups, equipment, duration_minutes, description, coaching_points, is_active, is_demo, created_by)
+    VALUES (?,?,?,?,?,?,?,?,1,1,?)
+  `);
+  tx(() => {
+    [
+      ['Yorker accuracy ladder', 'bowling', 'U14,U16,U19', 'Cones, stumps', 20, 'Six-ball sets aiming at the base of off stump.', 'Front arm high, land the seam upright.'],
+      ['Slip catching ladder', 'fielding', 'U16,U19', 'Catching cradle, tennis balls', 15, 'Progressive reaction catching at slip.', 'Soft hands, eyes level through contact.'],
+      ['Front-foot drive throwdowns', 'batting', 'U14,U16,U19', 'Throwdown machine or side-arm', 25, 'Repetition drives off a good length.', 'Head over the ball, full extension.'],
+      ['Middle practice — new ball', 'batting', 'U16,U19', 'Full kit, stumps', 30, 'Simulated first 10 overs against the new ball.', 'Leave on length, defend straight.'],
+      ['Running between wickets', 'fielding', 'U14,U16,U19', 'Cones, stopwatch', 15, 'Calling and turning drill in pairs.', 'Backlift on the call, dive only when needed.'],
+      ['Death-overs yorkers under fatigue', 'bowling', 'U19', 'Stumps, bowling machine', 20, 'Yorkers bowled after a fielding shuttle run.', 'Maintain the same action when tired.'],
+      ['Spin — flight and dip', 'bowling', 'U16,U19', 'Cones marking length', 20, 'Tossing the ball up to induce the drive.', 'Trust the loop, vary the seam position.'],
+      ['Wicketkeeping — standing up', 'wicket_keeping', 'U14,U16', 'Stumps, spin bowler', 20, 'Glovework standing up to spin.', 'Soft hands, stay low until the ball arrives.'],
+    ].forEach(([name, skill, ages, equip, mins, desc, points]) => {
+      drillStmt.run(cricketSportId, name, skill, ages, equip, mins, desc, points, cricketCoachId);
+    });
+  });
+  console.log('[seed] cricket drill library seeded');
+
+  // Digital groups
+  const groupStmt = db.prepare(`INSERT INTO player_groups (sport_id, name, description, color, is_active, is_demo, created_by) VALUES (?,?,?,?,1,1,?)`);
+  const groupMemberStmt = db.prepare(`INSERT OR IGNORE INTO player_group_members (group_id, player_id) VALUES (?,?)`);
+  let fastBowlersGroupId; let u16BattingGroupId;
+  tx(() => {
+    fastBowlersGroupId = groupStmt.run(cricketSportId, 'Fast Bowlers Development', 'Pace bowling group training outside full squad sessions.', '#E6B450', cricketCoachId).lastInsertRowid;
+    u16BattingGroupId = groupStmt.run(cricketSportId, 'U16 Batting Academy', 'Extra batting-focused sessions for the U16 top order.', '#4E9BE6', cricketCoachId).lastInsertRowid;
+    cricketSquad.filter((r) => ['fast_bowler', 'medium_pacer', 'all_rounder'].includes(r.position)).slice(0, 5)
+      .forEach((r) => groupMemberStmt.run(fastBowlersGroupId, r.player_id));
+    cricketU16.slice(0, 6).forEach((r) => groupMemberStmt.run(u16BattingGroupId, r.player_id));
+  });
+  console.log('[seed] cricket digital groups seeded');
+
+  // Messages: a squad announcement, a group note and an individual message
+  const msgStmt = db.prepare(`
+    INSERT INTO messages (sport_id, sender_id, scope_type, team_id, group_id, player_id, subject, body, is_demo, created_at)
+    VALUES (?,?,?,?,?,?,?,?,1,?)
+  `);
+  const msgRecipientStmt = db.prepare(`INSERT OR IGNORE INTO message_recipients (message_id, player_id, read_at) VALUES (?,?,?)`);
+  tx(() => {
+    const seniorTeamId = teamId('Karwan Cricket Senior XI');
+    const m1 = msgStmt.run(cricketSportId, cricketCoachId, 'team', seniorTeamId, null, null,
+      'Nets moved to 6am', 'Tomorrow\'s nets are moving to 6:00am on Ground A ahead of the weekend fixture. Bring your own bat and pads.',
+      daysAgo(3) + 'T18:00:00');
+    cricketSquad.forEach((r, i) => msgRecipientStmt.run(m1.lastInsertRowid, r.player_id, i < 6 ? daysAgo(2) + 'T09:00:00' : null));
+
+    const m2 = msgStmt.run(cricketSportId, cricketCoachId, 'group', null, fastBowlersGroupId, null,
+      'Extra pace session Thursday', 'Optional extra bowling session Thursday 4pm focused on yorker accuracy — bring your training bibs.',
+      daysAgo(1) + 'T15:00:00');
+    db.prepare('SELECT player_id FROM player_group_members WHERE group_id = ?').all(fastBowlersGroupId)
+      .forEach((r) => msgRecipientStmt.run(m2.lastInsertRowid, r.player_id, null));
+
+    if (cricketSquad[0]) {
+      const m3 = msgStmt.run(cricketSportId, cricketAdminId, 'player', null, null, cricketSquad[0].player_id,
+        'Selection update', 'Well played this week — you have been retained in the squad for the next round of fixtures.',
+        daysAgo(0) + 'T08:00:00');
+      msgRecipientStmt.run(m3.lastInsertRowid, cricketSquad[0].player_id, null);
+    }
+  });
+  console.log('[seed] cricket messages seeded');
+
+  // Showcase profiles — enabled for standout players in age groups that
+  // actually have benchmarks seeded (U18/Senior), so the comparison card on
+  // their profile has something real to show rather than "no benchmarks yet".
+  const showcaseStmt = db.prepare(`UPDATE players SET showcase_enabled = 1, showcase_token = ? WHERE id = ?`);
+  tx(() => {
+    const standouts = db
+      .prepare(`SELECT DISTINCT mp.player_id, MAX(mp.rating) AS best
+                FROM match_performances mp
+                JOIN team_memberships tm ON tm.player_id = mp.player_id AND tm.end_date IS NULL
+                JOIN teams t ON t.id = tm.team_id AND t.sport_id = mp.sport_id
+                WHERE mp.sport_id = ? AND t.age_group IN ('U18', 'Senior')
+                GROUP BY mp.player_id ORDER BY best DESC LIMIT 2`)
+      .all(cricketSportId);
+    standouts.forEach((s) => {
+      showcaseStmt.run(require('crypto').randomBytes(12).toString('hex'), s.player_id);
+    });
+  });
+  console.log('[seed] cricket showcase profiles enabled for standout players');
 
 
   /* ---- Ball-by-ball capture for a sample of matches ----------------- */
