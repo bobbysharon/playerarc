@@ -29,6 +29,7 @@ import Tracking from './pages/Tracking';
 import Announcements from './pages/Announcements';
 import Showcase from './pages/Showcase';
 import GuestBooking from './pages/GuestBooking';
+import AthletePortal from './pages/AthletePortal';
 import UserManager from './pages/UserManager';
 import ChangePassword from './pages/ChangePassword';
 
@@ -56,6 +57,9 @@ export default function App() {
       <Route path="/showcase/:token" element={<Showcase />} />
       {/* Booking needs no account, so it sits outside the signed-in shell. */}
       <Route path="/book" element={<GuestBooking />} />
+      {/* The athlete portal is its own surface: an athlete login cannot reach
+          any staff route, so it gets no staff navigation. */}
+      <Route path="/my" element={<AthletePortal />} />
       <Route path="/" element={<Protected><Dashboard /></Protected>} />
       <Route path="/players" element={<Protected><Players /></Protected>} />
       <Route path="/players/:id" element={<Protected><PlayerProfile /></Protected>} />

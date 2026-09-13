@@ -426,6 +426,89 @@ await t('only the administrator manages athlete logins', async()=>{
   return blocked;
 });
 
+// the athlete portal itself, not just its administration
+let portalEmail;
+await t('an athlete signs in to the portal', async()=>{
+  const list=await demoRequest('GET','/admin/athlete-logins');
+  portalEmail=list.logins.find(l=>l.status==='active').email;
+  const r=await demoRequest('POST','/athlete/login',{email:portalEmail,password:'Karwan@2026'});
+  return !!r.token && !('role' in r.athlete) && r.athlete.capabilities.length===1;
+});
+await t('the portal returns their own record', async()=>{
+  const me=await demoRequest('GET','/athlete/me');
+  const rec=await demoRequest('GET','/athlete/record');
+  return rec.athlete.athleteId===me.athlete.athleteId && Array.isArray(rec.careers) && Array.isArray(rec.teams);
+});
+await t('a suspended athlete cannot sign in', async()=>{
+  await demoRequest('POST','/auth/login',{email:'admin@playerarc.local',password:'Karwan@2026'});
+  const list=await demoRequest('GET','/admin/athlete-logins');
+  const suspended=list.logins.find(l=>l.status!=='active');
+  if(!suspended) return true;
+  try{await demoRequest('POST','/athlete/login',{email:suspended.email,password:'Karwan@2026'});return false;}
+  catch(e){return e.status===403;}
+});
+await t('an athlete changes their own password', async()=>{
+  await demoRequest('POST','/athlete/login',{email:portalEmail,password:'Karwan@2026'});
+  await demoRequest('POST','/athlete/change-password',{currentPassword:'Karwan@2026',newPassword:'MyOwnPass123'});
+  const again=await demoRequest('POST','/athlete/login',{email:portalEmail,password:'MyOwnPass123'});
+  await demoRequest('POST','/athlete/change-password',{currentPassword:'MyOwnPass123',newPassword:'Karwan@2026'});
+  await demoRequest('POST','/auth/login',{email:'admin@playerarc.local',password:'Karwan@2026'});
+  return !!again.token;
+});
+
+// booking a ground without an account
+await t('sports, grounds and coaches are public', async()=>{
+  const sports=await demoRequest('GET','/booking/sports');
+  const cricket=sports.sports.find(x=>x.code==='cricket');
+  const grounds=await demoRequest('GET',`/facilities?sport=${cricket.id}`);
+  const coaches=await demoRequest('GET',`/booking/coaches?sport=${cricket.id}`);
+  return sports.sports.length>0 && grounds.facilities.length>0
+    && coaches.coaches.every(c=>c.name&&c.speciality&&typeof c.yearsExperience==='number');
+});
+let demoRef;
+await t('a guest books a ground', async()=>{
+  const tomorrow=new Date(Date.now()+86400000).toISOString().slice(0,10);
+  const cricket=(await demoRequest('GET','/booking/sports')).sports.find(x=>x.code==='cricket');
+  const ground=(await demoRequest('GET',`/facilities?sport=${cricket.id}`)).facilities.find(f=>f.hourly_rate);
+  const avail=await demoRequest('GET',`/booking/availability?facility=${ground.id}&date=${tomorrow}`);
+  const slot=avail.slots.find(s2=>s2.available);
+  const r=await demoRequest('POST','/booking',{
+    facility_id:ground.id, booking_date:tomorrow, start_time:slot.start, end_time:slot.end,
+    contact_name:'Demo Guest', contact_phone:'+971 50 555 4444',
+  });
+  demoRef=r.booking.reference;
+  return !!demoRef && !Object.keys(r.booking).some(k=>/athlete|player|dob/i.test(k));
+});
+await t('the same slot cannot be taken twice', async()=>{
+  const b=await demoRequest('GET',`/booking/${demoRef}`);
+  const ground=(await demoRequest('GET','/facilities')).facilities.find(f=>f.name===b.booking.facility);
+  try{
+    await demoRequest('POST','/booking',{
+      facility_id:ground.id, booking_date:b.booking.date, start_time:b.booking.start, end_time:b.booking.end,
+      contact_name:'Second Guest', contact_phone:'+971 50 111 0000',
+    });
+    return false;
+  }catch(e){return e.status===409;}
+});
+await t('a booking needs a way to reach them', async()=>{
+  const ground=(await demoRequest('GET','/facilities')).facilities.find(f=>f.is_bookable);
+  const tomorrow=new Date(Date.now()+86400000).toISOString().slice(0,10);
+  try{await demoRequest('POST','/booking',{facility_id:ground.id,booking_date:tomorrow,start_time:'09:00',end_time:'10:00',contact_name:'No Contact'});return false;}
+  catch(e){return e.status===422;}
+});
+await t('staff can cancel any booking', async()=>{
+  // Signed-in staff do not need the guest's contact details — they are the
+  // club. The contact check is what protects a booking from a stranger, and
+  // that path is covered by the API suite, which calls it unauthenticated.
+  const ok=await demoRequest('POST',`/booking/${demoRef}/cancel`,{contact:'ignored for staff'});
+  const after=await demoRequest('GET',`/booking/${demoRef}`);
+  return ok.ok && after.booking.status==='cancelled';
+});
+await t('a cancelled booking cannot be cancelled again', async()=>{
+  try{await demoRequest('POST',`/booking/${demoRef}/cancel`,{contact:'+971 50 555 4444'});return false;}
+  catch(e){return e.status===409;}
+});
+
 // scoping
 await demoRequest('POST','/auth/login',{email:'coach.cricket@karwansportsclub.com',password:'Karwan@2026'});
 await t('coach scoped athlete list', async()=>{const r=await demoRequest('GET','/players?pageSize=100');return r.total>0&&r.total<46;});

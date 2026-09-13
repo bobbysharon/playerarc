@@ -955,6 +955,32 @@ await check('a genuinely new athlete still registers', async () => {
   return r.status === 201;
 });
 
+
+await check('a suspended athlete login is refused', async () => {
+  const list = await req('/admin/athlete-logins');
+  const suspended = list.d.logins.find((l) => l.status !== 'active');
+  if (!suspended) return true;
+  const r = await req('/athlete/login', { method: 'POST', body: { email: suspended.email, password: 'Karwan@2026' } });
+  return r.status === 403;
+});
+await check('an athlete changes their own password', async () => {
+  const list = await req('/admin/athlete-logins');
+  const who = list.d.logins.find((l) => l.status === 'active');
+  await req(`/admin/athlete-logins/${who.id}/password`, { method: 'POST', body: { password: 'KnownPass123', mustChange: true } });
+
+  const signIn = await req('/athlete/login', { method: 'POST', body: { email: who.email, password: 'KnownPass123' } });
+  const changed = await fetch(`${BASE}/athlete/change-password`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${signIn.d.token}` },
+    body: JSON.stringify({ currentPassword: 'KnownPass123', newPassword: 'TheirOwnPass456' }),
+  });
+  const after = await req('/athlete/login', { method: 'POST', body: { email: who.email, password: 'TheirOwnPass456' } });
+
+  // Leave the seeded password in place so the suite can run again.
+  await req(`/admin/athlete-logins/${who.id}/password`, { method: 'POST', body: { password: 'Karwan@2026', mustChange: false } });
+  return changed.ok && after.status === 200 && after.d.athlete.mustChangePassword === false;
+});
+
 /* ---- Single page app is served ---- */
 const origin = BASE.replace('/api', '');
 await check('web app served at /', async () => {

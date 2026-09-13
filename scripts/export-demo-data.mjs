@@ -32,6 +32,7 @@ const TABLES = [
   'benchmarks', 'announcements', 'announcement_recipients',
   'tracking_sessions', 'deliveries', 'consistency_targets', 'fitness_records',
   'assessment_templates', 'assessment_template_criteria', 'athlete_logins',
+  'facilities', 'facility_sports', 'coach_specialities', 'bookings',
 ];
 
 const data = {};

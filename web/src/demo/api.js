@@ -35,6 +35,13 @@ let passwords = {};
 /** Athlete portal passwords, held the same way and for the same reason. */
 let athletePasswords = {};
 
+/**
+ * The athlete session, kept apart from the staff one exactly as on the server:
+ * a staff session cannot read the portal, and an athlete session cannot read
+ * anything else. Declared here because reset() runs when this module loads.
+ */
+let athleteSession = null;
+
 /* ------------------------------------------------------------------ */
 /* Store                                                               */
 /* ------------------------------------------------------------------ */
@@ -48,6 +55,7 @@ function reset() {
   passwords = {};
   athletePasswords = {};
   session = null;
+  athleteSession = null;
 }
 
 const passwordFor = (userId) => passwords[userId] ?? DEMO_PASSWORD;
@@ -2469,6 +2477,326 @@ route('DELETE', /^\/admin\/athlete-logins\/(\d+)$/, (m) => {
   db.athlete_logins = db.athlete_logins.filter((a) => a.id !== row.id);
   audit('delete', 'athlete_logins', row.id, `Athlete portal login removed: ${row.email}`);
   return { ok: true };
+});
+
+
+/* ---- Athlete portal: separate sign-in, own record only ---- */
+
+const athletePasswordFor = (id) => athletePasswords[id] ?? DEMO_PASSWORD;
+
+function requireAthleteSession() {
+  if (!athleteSession) fail(401, 'Sign in to continue.');
+  return athleteSession;
+}
+
+const athleteProfile = (row) => {
+  const p = playerOf(row.player_id) || {};
+  return {
+    id: row.id,
+    playerId: row.player_id,
+    athleteId: p.athlete_id,
+    email: row.email,
+    name: p.display_name || `${p.first_name} ${p.last_name}`,
+    photoUrl: p.photo_url,
+    mustChangePassword: !!row.must_change_password,
+    capabilities: ['view own record'],
+  };
+};
+
+route('POST', /^\/athlete\/login$/, (_, body) => {
+  const row = find('athlete_logins', (a) => String(a.email).toLowerCase() === String(body.email || '').toLowerCase());
+  if (!row || body.password !== athletePasswordFor(row.id)) fail(401, 'Email or password is incorrect.');
+  if (row.status !== 'active') fail(403, 'This account is not active. Speak to the club.');
+  row.last_login_at = now();
+  athleteSession = row;
+  audit('login', 'athlete_logins', row.id, `Athlete signed in: ${row.email}`);
+  return { token: `athlete.${row.id}`, athlete: athleteProfile(row) };
+});
+
+route('GET', /^\/athlete\/me$/, () => ({ athlete: athleteProfile(requireAthleteSession()) }));
+
+route('POST', /^\/athlete\/change-password$/, (_, body) => {
+  const row = requireAthleteSession();
+  if (body.currentPassword !== athletePasswordFor(row.id)) fail(400, 'Your current password is incorrect.');
+  if (!body.newPassword || body.newPassword.length < 8) fail(422, 'Use at least 8 characters.');
+  athletePasswords[row.id] = body.newPassword;
+  row.must_change_password = 0;
+  audit('update', 'athlete_logins', row.id, 'Athlete changed their password');
+  return { ok: true };
+});
+
+route('GET', /^\/athlete\/record$/, () => {
+  const row = requireAthleteSession();
+  const playerId = row.player_id;
+  const p = playerOf(playerId);
+  if (!p) fail(404, 'That athlete record no longer exists.');
+
+  return {
+    athlete: {
+      athleteId: p.athlete_id,
+      name: p.display_name || `${p.first_name} ${p.last_name}`,
+      photoUrl: p.photo_url,
+      dob: p.dob,
+      nationality: p.nationality,
+      status: p.status,
+      preferredHand: p.preferred_hand,
+      preferredFoot: p.preferred_foot,
+      registeredSince: p.registration_date,
+    },
+    summary: summaryFor(playerId),
+    careers: careersFor(playerId).map((c) => ({
+      sport: c.sport, matchesPlayed: c.matchesPlayed, headline: c.headline,
+      rating: c.rating ? { overall: c.rating.overall } : null,
+      career: { groups: c.career.groups },
+    })),
+    teams: filter('team_memberships', (tm) => tm.player_id === playerId).map((tm) => {
+      const t = byId('teams', tm.team_id) || {};
+      return {
+        id: t.id, name: t.name, age_group: t.age_group, level: t.level,
+        sport_name: byId('sports', t.sport_id)?.name,
+        role: tm.role, jersey_number: tm.jersey_number,
+        start_date: tm.start_date, end_date: tm.end_date,
+      };
+    }).sort((a, b) => (!!a.end_date - !!b.end_date) || String(b.start_date).localeCompare(String(a.start_date))),
+    upcoming: filter('match_players', (mp) => mp.player_id === playerId)
+      .map((mp) => byId('matches', mp.match_id))
+      .filter((m) => m && String(m.scheduled_at) >= now())
+      .map((m) => ({
+        id: m.id, scheduled_at: m.scheduled_at, venue: m.venue, opponent_name: m.opponent_name,
+        sport_name: byId('sports', m.sport_id)?.name, team_name: teamName(m.home_team_id),
+      }))
+      .sort((a, b) => String(a.scheduled_at).localeCompare(String(b.scheduled_at))).slice(0, 10),
+    sessions: filter('training_attendance', (ta) => ta.player_id === playerId).map((ta) => {
+      const ts = byId('training_sessions', ta.session_id) || {};
+      return {
+        id: ts.id, session_date: ts.session_date, start_time: ts.start_time, title: ts.title,
+        training_type: ts.training_type, location: ts.location,
+        sport_name: byId('sports', ts.sport_id)?.name, status: ta.status,
+      };
+    }).sort((a, b) => String(b.session_date).localeCompare(String(a.session_date))).slice(0, 15),
+    achievements: filter('achievements', (a) => a.player_id === playerId).map((a) => ({
+      title: a.title, category: a.category, level: a.level, awarded_date: a.awarded_date,
+      sport_name: byId('sports', a.sport_id)?.name,
+    })).sort((a, b) => String(b.awarded_date).localeCompare(String(a.awarded_date))),
+    timeline: filter('player_timeline', (t) => t.player_id === playerId)
+      .map((t) => ({ event_date: t.event_date, event_type: t.event_type, title: t.title, description: t.description, importance: t.importance }))
+      .sort((a, b) => String(b.event_date).localeCompare(String(a.event_date))).slice(0, 40),
+  };
+});
+
+
+/* ---- Grounds and bookings (mostly public) ---- */
+
+const toMinute = (value) => {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(value || '').trim());
+  if (!m) return null;
+  const h = Number(m[1]);
+  const min = Number(m[2]);
+  return h > 23 || min > 59 ? null : h * 60 + min;
+};
+const toClock = (minute) => `${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}`;
+
+route('GET', /^\/booking\/sports$/, () => ({
+  sports: all('sports')
+    .filter((sp) => sp.is_active && filter('facility_sports', (fs) => {
+      const f = byId('facilities', fs.facility_id);
+      return fs.sport_id === sp.id && f && f.is_bookable && f.is_active;
+    }).length)
+    .map((sp) => ({ id: sp.id, code: sp.code, name: sp.name, color: sp.color }))
+    .sort((a, b) => a.id - b.id),
+}));
+
+route('GET', /^\/facilities$/, (_, __, query) => ({
+  facilities: filter('facilities', (f) => {
+    if (!f.is_active) return false;
+    if (query.bookable !== 'false' && !f.is_bookable) return false;
+    if (query.sport) {
+      return filter('facility_sports', (fs) => fs.facility_id === f.id && fs.sport_id === Number(query.sport)).length > 0;
+    }
+    return true;
+  }).map((f) => ({
+    ...f,
+    sports: filter('facility_sports', (fs) => fs.facility_id === f.id)
+      .map((fs) => byId('sports', fs.sport_id))
+      .filter(Boolean)
+      .map((sp) => ({ id: sp.id, code: sp.code, name: sp.name, color: sp.color })),
+  })).sort((a, b) => String(a.kind).localeCompare(String(b.kind)) || a.name.localeCompare(b.name)),
+}));
+
+route('GET', /^\/booking\/coaches$/, (_, __, query) => ({
+  coaches: filter('coach_specialities', (cs) => {
+    if (!cs.bookable) return false;
+    if (query.sport) return cs.sport_id === Number(query.sport) || cs.sport_id == null;
+    return true;
+  }).map((cs) => {
+    const c = byId('coaches', cs.coach_id) || {};
+    const sp = byId('sports', cs.sport_id);
+    return {
+      coachId: cs.coach_id, specialityId: cs.id, name: c.full_name, photoUrl: c.photo_url,
+      speciality: cs.speciality, yearsExperience: cs.years_experience,
+      sport: sp ? { id: sp.id, name: sp.name, color: sp.color } : null,
+      hourlyRate: cs.hourly_rate, bio: cs.bio, isPrimary: !!cs.is_primary,
+    };
+  }).sort((a, b) => b.yearsExperience - a.yearsExperience || String(a.name).localeCompare(String(b.name))),
+}));
+
+/** What a ground has free, counting the club's own fixtures and training. */
+route('GET', /^\/booking\/availability$/, (_, __, query) => {
+  const facility = byId('facilities', Number(query.facility));
+  const date = String(query.date || '');
+  if (!facility || !/^\d{4}-\d{2}-\d{2}$/.test(date)) fail(422, 'Choose a ground and a date.');
+
+  const opens = toMinute(facility.opens_at) ?? 360;
+  const closes = toMinute(facility.closes_at) ?? 1320;
+  const step = facility.slot_minutes || 60;
+
+  const busy = [
+    ...filter('bookings', (b) => b.facility_id === facility.id && b.booking_date === date && b.status === 'confirmed')
+      .map((b) => ({ start: b.start_minute, end: b.end_minute, label: 'Booked' })),
+    ...filter('matches', (m) => String(m.scheduled_at).slice(0, 10) === date && m.venue === facility.name)
+      .map((m) => {
+        const start = toMinute(String(m.scheduled_at).slice(11, 16)) ?? 0;
+        return { start, end: start + 180, label: 'Match' };
+      }),
+    ...filter('training_sessions', (t) => t.session_date === date && t.location === facility.name)
+      .map((t) => {
+        const start = toMinute(t.start_time || '00:00') ?? 0;
+        return { start, end: start + (t.duration_minutes || 90), label: 'Training' };
+      }),
+  ];
+
+  const now = new Date();
+  const isToday = date === now.toISOString().slice(0, 10);
+  const minutesNow = now.getHours() * 60 + now.getMinutes();
+
+  const slots = [];
+  for (let start = opens; start + step <= closes; start += step) {
+    const end = start + step;
+    const clash = busy.find((x) => start < x.end && end > x.start);
+    const past = isToday && start <= minutesNow;
+    slots.push({
+      start: toClock(start), end: toClock(end), startMinute: start, endMinute: end,
+      available: !clash && !past,
+      reason: past ? 'Already passed' : clash ? clash.label : null,
+    });
+  }
+
+  return {
+    facility: { id: facility.id, name: facility.name, kind: facility.kind, slotMinutes: step, hourlyRate: facility.hourly_rate, currency: facility.currency },
+    date,
+    slots,
+    available: slots.filter((s2) => s2.available).length,
+  };
+});
+
+route('POST', /^\/booking$/, (_, body) => {
+  const facility = byId('facilities', body.facility_id);
+  if (!facility || !facility.is_bookable || !facility.is_active) fail(404, 'That ground is not available for booking.');
+
+  const start = toMinute(body.start_time);
+  const end = toMinute(body.end_time);
+  if (start === null || end === null) fail(422, 'Times must look like 17:00.');
+  if (end <= start) fail(422, 'The booking has to end after it starts.');
+  if (!body.contact_name || String(body.contact_name).trim().length < 2) fail(422, 'Give a name for the booking.');
+  if (!body.contact_phone && !body.contact_email) fail(422, 'Leave a phone number or an email so the club can reach you.');
+
+  const opens = toMinute(facility.opens_at) ?? 0;
+  const closes = toMinute(facility.closes_at) ?? 1440;
+  if (start < opens || end > closes) fail(422, `${facility.name} is open from ${facility.opens_at} to ${facility.closes_at}.`);
+
+  const todayIso = new Date().toISOString().slice(0, 10);
+  if (body.booking_date < todayIso) fail(422, 'That date has already passed.');
+
+  const clash = find('bookings', (b) => b.facility_id === facility.id && b.booking_date === body.booking_date
+    && b.status === 'confirmed' && start < b.end_minute && end > b.start_minute);
+  if (clash) fail(409, 'That slot has just been taken. Please choose another.');
+
+  let coach = null;
+  if (body.coach_id) {
+    coach = byId('coaches', body.coach_id);
+    if (!coach) fail(404, 'That coach is not available.');
+    const coachBusy = find('bookings', (b) => b.coach_id === coach.id && b.booking_date === body.booking_date
+      && b.status === 'confirmed' && start < b.end_minute && end > b.start_minute);
+    if (coachBusy) fail(409, `${coach.full_name} is already booked at that time.`);
+  }
+
+  const hours = (end - start) / 60;
+  const amount = facility.hourly_rate ? Math.round(facility.hourly_rate * hours * 100) / 100 : null;
+  const reference = `BK-${Math.random().toString(16).slice(2, 8).toUpperCase()}`;
+
+  const row = {
+    id: nextId('bookings'), reference, facility_id: facility.id,
+    sport_id: body.sport_id ?? null, coach_id: body.coach_id ?? null,
+    booking_date: body.booking_date, start_time: toClock(start), end_time: toClock(end),
+    start_minute: start, end_minute: end,
+    booked_by: session ? 'staff' : 'guest', player_id: null, created_by: session?.id ?? null,
+    contact_name: body.contact_name, contact_phone: body.contact_phone || null,
+    contact_email: body.contact_email || null, party_size: body.party_size ?? null,
+    notes: body.notes ?? null, status: 'confirmed', cancelled_at: null, cancel_reason: null,
+    amount, currency: facility.currency, is_demo: 0, created_at: now(), updated_at: now(),
+  };
+  if (!db.bookings) db.bookings = [];
+  db.bookings.push(row);
+  audit('create', 'bookings', row.id, `Booking ${reference}: ${facility.name} on ${row.booking_date} at ${row.start_time}`);
+
+  return {
+    booking: {
+      reference, facility: facility.name, date: row.booking_date,
+      start: row.start_time, end: row.end_time, coach: coach ? coach.full_name : null,
+      amount, currency: row.currency, contactName: row.contact_name,
+    },
+  };
+});
+
+route('GET', /^\/booking\/([A-Za-z0-9-]+)$/, (m) => {
+  const row = find('bookings', (b) => String(b.reference).toUpperCase() === String(m[1]).toUpperCase());
+  if (!row) fail(404, 'No booking found with that reference.');
+  const f = byId('facilities', row.facility_id) || {};
+  return {
+    booking: {
+      reference: row.reference, facility: f.name, where: f.location_note,
+      sport: byId('sports', row.sport_id)?.name, coach: byId('coaches', row.coach_id)?.full_name,
+      date: row.booking_date, start: row.start_time, end: row.end_time,
+      status: row.status, contactName: row.contact_name, amount: row.amount, currency: row.currency,
+    },
+  };
+});
+
+route('POST', /^\/booking\/([A-Za-z0-9-]+)\/cancel$/, (m, body) => {
+  const row = find('bookings', (b) => String(b.reference).toUpperCase() === String(m[1]).toUpperCase());
+  if (!row) fail(404, 'No booking found with that reference.');
+  if (row.status === 'cancelled') fail(409, 'That booking is already cancelled.');
+  const given = String(body.contact || '').toLowerCase().replace(/\s/g, '');
+  const matches2 = session || [row.contact_phone, row.contact_email].filter(Boolean)
+    .some((v) => String(v).toLowerCase().replace(/\s/g, '') === given);
+  if (!matches2) fail(403, 'That does not match the contact the booking was made with.');
+  row.status = 'cancelled';
+  row.cancelled_at = now();
+  row.cancel_reason = body.reason ?? null;
+  audit('update', 'bookings', row.id, `Booking ${row.reference} cancelled`);
+  return { ok: true };
+});
+
+route('GET', /^\/bookings$/, (_, __, query) => {
+  requireAuth();
+  const bookings = filter('bookings', (b) => {
+    if (query.date && b.booking_date !== query.date) return false;
+    if (query.from && b.booking_date < query.from) return false;
+    if (query.facility && b.facility_id !== Number(query.facility)) return false;
+    if (query.status && b.status !== query.status) return false;
+    return true;
+  }).map((b) => ({
+    ...b,
+    facility_name: byId('facilities', b.facility_id)?.name,
+    sport_name: byId('sports', b.sport_id)?.name,
+    coach_name: byId('coaches', b.coach_id)?.full_name,
+  })).sort((a, b) => String(b.booking_date).localeCompare(String(a.booking_date)) || a.start_minute - b.start_minute);
+  const todayIso = new Date().toISOString().slice(0, 10);
+  return {
+    bookings,
+    total: bookings.length,
+    upcoming: bookings.filter((b) => b.status === 'confirmed' && b.booking_date >= todayIso).length,
+  };
 });
 
 /* ---- Training ---- */

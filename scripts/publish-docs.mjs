@@ -11,7 +11,7 @@
  * Pages serves index.html for the site root, and .nojekyll stops GitHub
  * running the folder through Jekyll — which is what was rendering README.md.
  */
-import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -21,6 +21,19 @@ const docs = join(root, 'docs');
 
 if (!existsSync(join(dist, 'index.html'))) {
   console.error('[pages] web/dist is empty — run "npm run build:demo" first.');
+  process.exit(1);
+}
+
+// The staff build and the demo build write to the same directory, so whatever
+// happens to be in web/dist is not necessarily the one that should be
+// published. Staging a staff build as the Pages demo produces a site whose
+// every request fails, and the failure only shows up in the browser — so it is
+// checked here instead.
+const bundles = readdirSync(join(dist, 'assets')).filter((f) => f.endsWith('.js'));
+const isDemoBuild = bundles.some((f) => readFileSync(join(dist, 'assets', f), 'utf8').includes('demoRequest'));
+if (!isDemoBuild) {
+  console.error('[pages] web/dist holds the server build, not the browser demo.');
+  console.error('[pages] Run "npm run build:pages", which builds the demo before staging it.');
   process.exit(1);
 }
 
@@ -41,5 +54,5 @@ for (const entry of readdirSync(dist)) {
 // script exists to avoid.
 writeFileSync(join(docs, '.nojekyll'), '');
 
-console.log('[pages] demo staged in docs/');
+console.log(`[pages] demo staged in docs/ (${bundles.length} bundles, demo build confirmed)`);
 console.log('[pages] commit docs/ and set Pages to: Deploy from a branch → main → /docs');

@@ -448,6 +448,11 @@ npm run build          # local
 npm run build:pages    # then commit docs/ and push, for the GitHub Pages demo
 ```
 
+Both builds write to `web/dist`, so whatever is there is not necessarily the one that should be
+published. Staging the server build as the Pages demo produces a site where every request fails, and
+the failure only shows up in a browser — so `publish-docs.mjs` checks the staged bundle really is the
+demo build and refuses otherwise.
+
 Hard-refresh (Ctrl+Shift+R) after deploying. The Pages demo only changes when you push.
 
 ## Signing in, and booking without an account
@@ -479,6 +484,16 @@ phone are checked as well, because a guardian's contact is often shared between 
 email alone proves nothing, but the same *name* on the same contact almost always means the record is
 being entered twice. Any match is refused with the existing athlete ID, so whoever is entering it can
 go and find the record rather than working around the error.
+
+## The athlete portal
+
+An athlete signs in on the **Athlete** tab and lands at `/my` — their own record and nothing else:
+career figures by sport, squads, what is coming up, training attendance, honours and their journey.
+
+It is a separate surface from the staff application on purpose. There is no navigation to the roster
+or any club screen, because an athlete login cannot reach those routes anyway — the page matches what
+the credential can actually do rather than offering links that would fail. A password issued by the
+club has to be replaced before anything is shown.
 
 ## Athlete logins
 
