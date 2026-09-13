@@ -27,15 +27,19 @@ export default function MatchScoring() {
   const [notice, setNotice] = useState(null);
   const [creatingPeriod, setCreatingPeriod] = useState(false);
   const [detailFor, setDetailFor] = useState(null);   // outcome awaiting extra detail
+  const [live, setLive] = useState(null);            // running score, derived from the events
   const feedRef = useRef(null);
 
-  // Who is on the field for each role
-  const [roles, setRoles] = useState({ primary: '', secondary: '', tertiary: '' });
+  // Who is on the field, kept per event type. A football scorer sets the
+  // shooter once and the goalkeeper once; recording a card does not then
+  // credit the goal to whoever happened to be selected.
+  const [rolesByType, setRolesByType] = useState({});
   const [coords, setCoords] = useState(null);
   const [minute, setMinute] = useState('');
 
   const load = useCallback(() => {
     api.get(`/matches/${id}`).then(setMatch).catch(setError);
+    api.get(`/matches/${id}/analysis`).then(setLive).catch(() => {});
     api.get(`/matches/${id}/periods`).then((d) => {
       setPeriods(d.periods);
       setActivePeriod((cur) => cur ?? d.periods.find((p) => p.status === 'in_progress')?.id ?? d.periods.at(-1)?.id ?? null);
@@ -73,25 +77,30 @@ export default function MatchScoring() {
   const ballType = (config.types || []).find((t) => t.isProgress) || config.types[0];
   const current = periods.find((p) => p.id === activePeriod);
 
-  async function record(type, outcome, extraPayload = {}) {
+  const rolesFor = (typeKey) => rolesByType[typeKey] || { primary: '', secondary: '', tertiary: '' };
+  const setRolesFor = (typeKey, next) => setRolesByType({ ...rolesByType, [typeKey]: next });
+
+  async function record(type, outcome, extraPayload = {}, overrideRoles = null) {
     setError(null);
     setNotice(null);
     try {
+      const active = overrideRoles || rolesFor(type.key);
       const body = {
         period_id: activePeriod,
         event_type: type.key,
         outcome: outcome?.key ?? null,
         payload: { ...(outcome?.set || {}), ...extraPayload },
-        primary_player_id: roles.primary ? Number(roles.primary) : null,
-        secondary_player_id: roles.secondary ? Number(roles.secondary) : null,
-        tertiary_player_id: roles.tertiary ? Number(roles.tertiary) : null,
+        primary_player_id: active.primary ? Number(active.primary) : null,
+        secondary_player_id: active.secondary ? Number(active.secondary) : null,
+        tertiary_player_id: active.tertiary ? Number(active.tertiary) : null,
         x: coords?.x ?? null,
         y: coords?.y ?? null,
         minute: config.clockBased && minute !== '' ? Number(minute) : null,
       };
       const r = await api.post(`/matches/${id}/events`, body);
       setCoords(null);
-      if (r.milestones?.length) setNotice({ title: 'Milestone reached', items: r.milestones });
+      if (r.warning) setNotice({ title: 'Scorecard recomputed', items: [r.warning], tone: 'warn' });
+      else if (r.milestones?.length) setNotice({ title: 'Milestone reached', items: r.milestones });
       load();
       setTimeout(() => feedRef.current?.scrollTo({ top: 0, behavior: 'smooth' }), 100);
     } catch (err) {
@@ -136,11 +145,81 @@ export default function MatchScoring() {
 
       <ErrorNote error={error} />
       {notice && (
-        <div className="mb-4 rounded-lg border border-gold/30 bg-gold/10 px-4 py-3 text-sm text-gold">
+        <div className={`mb-4 rounded-lg border px-4 py-3 text-sm ${
+          notice.tone === 'warn' ? 'border-sky/30 bg-sky/10 text-sky' : 'border-gold/30 bg-gold/10 text-gold'
+        }`}>
           <p className="font-semibold">{notice.title}</p>
-          <ul className="list-disc pl-5 mt-1">{notice.items.map((m, i) => <li key={i}>{m}</li>)}</ul>
+          <ul className={notice.items.length > 1 ? 'list-disc pl-5 mt-1' : 'mt-1'}>
+            {notice.items.map((m, i) => <li key={i} className={notice.items.length > 1 ? '' : 'list-none'}>{m}</li>)}
+          </ul>
         </div>
       )}
+
+      {/* Live scoreboard, computed from what has been recorded so far */}
+      {live && activePeriod && (() => {
+        const innings = live.periods.find((p) => p.period.id === activePeriod);
+        if (!innings || !innings.summary) return null;
+        const sum = innings.summary;
+        const isCricket = innings.kind === 'cricket';
+        const striker = isCricket
+          ? innings.battingCard.filter((b) => !b.out).sort((a, b) => b.balls - a.balls)[0]
+          : null;
+        const bowler = isCricket
+          ? innings.bowlingCard.slice().sort((a, b) => b.balls - a.balls)[0]
+          : null;
+
+        return (
+          <div className="card-glow rounded-xl border border-line p-4 mb-5">
+            <div className="flex flex-wrap items-end gap-x-8 gap-y-3">
+              <div>
+                <p className="label">{innings.period.label}</p>
+                <p className="font-display text-4xl leading-none text-ink mt-1">
+                  {isCricket ? `${sum.runs}/${sum.wickets}` : (sum.points ?? sum.pointsFor ?? sum.scores ?? 0)}
+                  {isCricket && <span className="text-ink-400 text-xl ml-2">({sum.overs})</span>}
+                </p>
+              </div>
+              {isCricket ? (
+                <>
+                  <Metric label="Run rate" value={sum.runRate} />
+                  <Metric label="Extras" value={sum.extrasTotal} />
+                  <Metric label="Boundaries" value={sum.boundaries} />
+                  <Metric label="Dot balls" value={`${sum.dotBallPercent}%`} />
+                  {sum.target != null && <Metric label="Target" value={sum.target} tone="text-gold" />}
+                  {sum.requiredRate != null && <Metric label="Required" value={sum.requiredRate} tone="text-gold" />}
+                </>
+              ) : (
+                <>
+                  <Metric label="Events" value={innings.events} />
+                  {sum.shots != null && <Metric label="Shots" value={sum.shots} />}
+                  {sum.conversion != null && <Metric label="Conversion" value={`${sum.conversion}%`} />}
+                  {sum.pointsAgainst != null && <Metric label="Conceded" value={sum.pointsAgainst} />}
+                </>
+              )}
+            </div>
+
+            {isCricket && (striker || bowler) && (
+              <div className="flex flex-wrap gap-x-8 gap-y-2 mt-4 pt-3 border-t border-line">
+                {striker && (
+                  <span className="text-sm">
+                    <span className="label mr-2">Batting</span>
+                    <span className="text-ink">{striker.name}</span>
+                    <span className="stat-value ml-2">{striker.runs}<span className="text-ink-400">({striker.balls})</span></span>
+                    <span className="text-ink-400 text-xs ml-2">SR {striker.strikeRate}</span>
+                  </span>
+                )}
+                {bowler && (
+                  <span className="text-sm">
+                    <span className="label mr-2">Bowling</span>
+                    <span className="text-ink">{bowler.name}</span>
+                    <span className="stat-value ml-2">{bowler.wickets}/{bowler.runs}</span>
+                    <span className="text-ink-400 text-xs ml-2">{bowler.overs} ov · econ {bowler.economy}</span>
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Periods */}
       <div className="flex flex-wrap items-center gap-2 mb-5">
@@ -171,39 +250,42 @@ export default function MatchScoring() {
       ) : (
         <div className="grid lg:grid-cols-3 gap-5">
           <div className="lg:col-span-2 space-y-5">
-            {/* Who is involved */}
-            <Section title="On the field" subtitle="Set these once; they stay until you change them">
-              <div className="p-4 grid sm:grid-cols-3 gap-3">
-                {['primary', 'secondary', 'tertiary'].map((role) => {
-                  const label = ballType[`${role}Label`];
-                  if (!label) return null;
-                  return (
-                    <Field key={role} label={label}>
-                      <select
-                        className="input"
-                        value={roles[role]}
-                        onChange={(e) => setRoles({ ...roles, [role]: e.target.value })}
-                      >
-                        <option value="">Opposition / not recorded</option>
-                        {lineup.map((l) => (
-                          <option key={l.player_id} value={l.player_id}>{playerName(l)}</option>
-                        ))}
-                      </select>
-                    </Field>
-                  );
-                })}
-                {config.clockBased && (
-                  <Field label="Minute">
+            {/* Who is involved, for whichever event type is being recorded */}
+            {config.clockBased && (
+              <Section title="Match clock">
+                <div className="p-4 max-w-xs">
+                  <Field label="Minute" hint="Applied to every event you record until you change it">
                     <input className="input font-mono" type="number" min="0" max="130" value={minute} onChange={(e) => setMinute(e.target.value)} />
                   </Field>
-                )}
-              </div>
-            </Section>
+                </div>
+              </Section>
+            )}
 
             {/* The buttons */}
             {(config.types || []).filter((t) => (t.outcomes || []).length).map((type) => (
-              <Section key={type.key} title={type.label} subtitle={type.key === ballType.key ? 'Tap an outcome to record it' : undefined}>
+              <Section key={type.key} title={type.label} subtitle="Name who was involved, then tap an outcome">
                 <div className="p-4">
+                  <div className="grid sm:grid-cols-3 gap-3 mb-4">
+                    {['primary', 'secondary', 'tertiary'].map((role) => {
+                      const label = type[`${role}Label`];
+                      if (!label) return null;
+                      const current = rolesFor(type.key);
+                      return (
+                        <Field key={role} label={label}>
+                          <select
+                            className="input"
+                            value={current[role]}
+                            onChange={(e) => setRolesFor(type.key, { ...current, [role]: e.target.value })}
+                          >
+                            <option value="">Opposition / not recorded</option>
+                            {lineup.map((l) => (
+                              <option key={l.player_id} value={l.player_id}>{playerName(l)}</option>
+                            ))}
+                          </select>
+                        </Field>
+                      );
+                    })}
+                  </div>
                   <div className="flex flex-wrap gap-2">
                     {type.outcomes.map((o) => (
                       <button
@@ -296,7 +378,7 @@ export default function MatchScoring() {
         onClose={() => setDetailFor(null)}
         detail={detailFor}
         lineup={lineup}
-        roles={roles}
+        roles={detailFor ? rolesFor(detailFor.type.key) : {}}
         onRecord={record}
       />
     </>
@@ -306,6 +388,16 @@ export default function MatchScoring() {
 /* ------------------------------------------------------------------ */
 /* Coordinates                                                         */
 /* ------------------------------------------------------------------ */
+
+/** One figure on the live scoreboard. */
+function Metric({ label, value, tone = 'text-ink' }) {
+  return (
+    <div>
+      <p className="label">{label}</p>
+      <p className={`stat-value text-xl mt-0.5 ${tone}`}>{value}</p>
+    </div>
+  );
+}
 
 function CoordinatePicker({ surface, value, onChange }) {
   const handle = (e) => {
@@ -364,6 +456,7 @@ function CoordinatePicker({ surface, value, onChange }) {
 
 function DetailForm({ open, onClose, detail, lineup, roles, onRecord }) {
   const [values, setValues] = useState({});
+  const [who, setWho] = useState({ primary: '', secondary: '', tertiary: '' });
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -373,7 +466,10 @@ function DetailForm({ open, onClose, detail, lineup, roles, onRecord }) {
       if (f.default !== undefined) defaults[f.key] = f.default;
     }
     setValues({ ...defaults, ...(detail.outcome?.set || {}) });
-  }, [open, detail]);
+    // Start from whoever is already selected for this event type, so the
+    // common case needs no extra clicks.
+    setWho({ primary: roles?.primary || '', secondary: roles?.secondary || '', tertiary: roles?.tertiary || '' });
+  }, [open, detail, roles]);
 
   if (!detail) return null;
   const { type, outcome } = detail;
@@ -381,7 +477,7 @@ function DetailForm({ open, onClose, detail, lineup, roles, onRecord }) {
   async function submit(e) {
     e.preventDefault();
     setBusy(true);
-    await onRecord(type, outcome, values);
+    await onRecord(type, outcome, values, who);
     setBusy(false);
     onClose();
   }
@@ -391,6 +487,26 @@ function DetailForm({ open, onClose, detail, lineup, roles, onRecord }) {
   return (
     <Modal open={open} onClose={onClose} title={`${type.label}${outcome ? ` — ${outcome.label}` : ''}`} wide>
       <form onSubmit={submit} className="space-y-4">
+        {['primary', 'secondary', 'tertiary'].some((r) => type[`${r}Label`]) && (
+          <div>
+            <p className="label mb-2">Who was involved</p>
+            <div className="grid sm:grid-cols-3 gap-3">
+              {['primary', 'secondary', 'tertiary'].map((role) => {
+                const label = type[`${role}Label`];
+                if (!label) return null;
+                return (
+                  <Field key={role} label={label}>
+                    <select className="input" value={who[role]} onChange={(e) => setWho({ ...who, [role]: e.target.value })}>
+                      <option value="">Opposition / not recorded</option>
+                      {lineup.map((l) => <option key={l.player_id} value={l.player_id}>{playerName(l)}</option>)}
+                    </select>
+                  </Field>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {(type.fields || []).filter((f) => !f.derived).map((f) => (
             <Field key={f.key} label={f.label} hint={f.help}>
@@ -424,7 +540,7 @@ function DetailForm({ open, onClose, detail, lineup, roles, onRecord }) {
         {/* Which batter was dismissed — the one field a wicket always needs */}
         {values.wicket ? (
           <Field label="Batter dismissed" hint="Defaults to the striker">
-            <select className="input" value={values.dismissed_player_id ?? roles.primary ?? ''} onChange={(e) => set('dismissed_player_id', e.target.value)}>
+            <select className="input" value={values.dismissed_player_id ?? who.primary ?? ''} onChange={(e) => set('dismissed_player_id', e.target.value)}>
               <option value="">Striker</option>
               {lineup.map((l) => <option key={l.player_id} value={l.player_id}>{playerName(l)}</option>)}
             </select>

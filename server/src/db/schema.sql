@@ -135,10 +135,13 @@ CREATE TABLE IF NOT EXISTS players (
   bio                TEXT,
   notes              TEXT,
   visibility         TEXT NOT NULL DEFAULT 'club' CHECK (visibility IN ('public','club','staff','private')),
-  -- showcase profile (cricket only, see routes/showcase.js) — a shareable,
-  -- read-only public link with no contact details and no video
+  -- Showcase profile: a shareable summary of an athlete's record, for
+  -- selectors and academies. Off by default; the token is what makes the
+  -- link unguessable, and revoking it is a matter of clearing this column.
   showcase_enabled   INTEGER NOT NULL DEFAULT 0,
   showcase_token     TEXT UNIQUE,
+  showcase_headline  TEXT,
+  showcase_updated_at TEXT,
   is_demo            INTEGER NOT NULL DEFAULT 0,
   created_by         INTEGER REFERENCES users(id),
   created_at         TEXT NOT NULL DEFAULT (datetime('now')),
@@ -484,107 +487,12 @@ CREATE INDEX IF NOT EXISTS idx_events_secondary ON match_events(secondary_player
 CREATE INDEX IF NOT EXISTS idx_events_type ON match_events(match_id, event_type);
 
 -- ---------------------------------------------------------------------
--- 5b. CRICKET ACADEMY MANAGEMENT (digital groups, drill library)
--- Cricket-only in the UI/API; the schema is sport-scoped like everything
--- else so it costs nothing to keep generic.
--- ---------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS player_groups (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  sport_id    INTEGER NOT NULL REFERENCES sports(id) ON DELETE CASCADE,
-  name        TEXT NOT NULL,
-  description TEXT,
-  color       TEXT,
-  is_active   INTEGER NOT NULL DEFAULT 1,
-  is_demo     INTEGER NOT NULL DEFAULT 0,
-  created_by  INTEGER REFERENCES users(id),
-  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE INDEX IF NOT EXISTS idx_groups_sport ON player_groups(sport_id);
-
-CREATE TABLE IF NOT EXISTS player_group_members (
-  group_id  INTEGER NOT NULL REFERENCES player_groups(id) ON DELETE CASCADE,
-  player_id INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
-  added_at  TEXT NOT NULL DEFAULT (datetime('now')),
-  PRIMARY KEY (group_id, player_id)
-);
-
-CREATE TABLE IF NOT EXISTS drills (
-  id               INTEGER PRIMARY KEY AUTOINCREMENT,
-  sport_id         INTEGER NOT NULL REFERENCES sports(id) ON DELETE CASCADE,
-  name             TEXT NOT NULL,
-  skill_group      TEXT NOT NULL,   -- e.g. batting | bowling | fielding | fitness
-  age_groups       TEXT,            -- comma-separated, e.g. "U12,U14"
-  equipment        TEXT,
-  duration_minutes INTEGER,
-  description      TEXT,
-  coaching_points  TEXT,
-  is_active        INTEGER NOT NULL DEFAULT 1,
-  is_demo          INTEGER NOT NULL DEFAULT 0,
-  created_by       INTEGER REFERENCES users(id),
-  created_at       TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at       TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE INDEX IF NOT EXISTS idx_drills_sport ON drills(sport_id, skill_group);
-
--- ---------------------------------------------------------------------
--- 5c. AGE-GROUP BENCHMARKS
--- Reference thresholds per sport/age-group/metric, compared against a
--- player's own career figures. Cricket-only in the UI for now.
--- ---------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS sport_benchmarks (
-  id              INTEGER PRIMARY KEY AUTOINCREMENT,
-  sport_id        INTEGER NOT NULL REFERENCES sports(id) ON DELETE CASCADE,
-  age_group       TEXT NOT NULL,
-  metric_key      TEXT NOT NULL,     -- a career stat key from the sport's config, e.g. "batting_average"
-  benchmark_value REAL NOT NULL,
-  level           TEXT NOT NULL DEFAULT 'target' CHECK (level IN ('emerging','developing','target','elite')),
-  notes           TEXT,
-  is_demo         INTEGER NOT NULL DEFAULT 0,
-  created_by      INTEGER REFERENCES users(id),
-  created_at      TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
-  UNIQUE (sport_id, age_group, metric_key, level)
-);
-CREATE INDEX IF NOT EXISTS idx_benchmarks_sport ON sport_benchmarks(sport_id, age_group);
-
--- ---------------------------------------------------------------------
--- 5d. MESSAGING
--- Direct messages to a squad, a digital group, or an individual athlete.
--- Cricket-only for now (enforced in routes/messages.js).
--- ---------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS messages (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  sport_id    INTEGER NOT NULL REFERENCES sports(id) ON DELETE CASCADE,
-  sender_id   INTEGER NOT NULL REFERENCES users(id),
-  scope_type  TEXT NOT NULL CHECK (scope_type IN ('team','group','player')),
-  team_id     INTEGER REFERENCES teams(id) ON DELETE CASCADE,
-  group_id    INTEGER REFERENCES player_groups(id) ON DELETE CASCADE,
-  player_id   INTEGER REFERENCES players(id) ON DELETE CASCADE,
-  subject     TEXT,
-  body        TEXT NOT NULL,
-  is_demo     INTEGER NOT NULL DEFAULT 0,
-  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE INDEX IF NOT EXISTS idx_messages_sport ON messages(sport_id, created_at);
-
-CREATE TABLE IF NOT EXISTS message_recipients (
-  id         INTEGER PRIMARY KEY AUTOINCREMENT,
-  message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
-  player_id  INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
-  read_at    TEXT,
-  UNIQUE (message_id, player_id)
-);
-CREATE INDEX IF NOT EXISTS idx_msg_recipients_player ON message_recipients(player_id);
-
--- ---------------------------------------------------------------------
 -- 6. TRAINING
 -- ---------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS training_sessions (
   id                    INTEGER PRIMARY KEY AUTOINCREMENT,
   sport_id              INTEGER NOT NULL REFERENCES sports(id) ON DELETE CASCADE,
   team_id               INTEGER REFERENCES teams(id) ON DELETE SET NULL,
-  group_id              INTEGER REFERENCES player_groups(id) ON DELETE SET NULL,
   coach_id              INTEGER REFERENCES coaches(id) ON DELETE SET NULL,
   title                 TEXT,
   session_date          TEXT NOT NULL,
@@ -605,8 +513,6 @@ CREATE TABLE IF NOT EXISTS training_sessions (
   updated_at            TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_train_team_date ON training_sessions(team_id, session_date);
--- idx_train_group_date is created in migrate.js, after group_id is guaranteed to
--- exist on both fresh installs and upgraded (pre-existing) databases.
 
 CREATE TABLE IF NOT EXISTS training_attendance (
   id                    INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -800,4 +706,364 @@ CREATE TABLE IF NOT EXISTS settings (
   value_json TEXT NOT NULL,
   updated_by INTEGER REFERENCES users(id),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- =====================================================================
+-- 13. ACADEMY: DRILLS, SESSION PLANS, BENCHMARKS, MESSAGING
+--
+-- The coaching layer. Everything above records what happened; this is the
+-- material a coach works from — the drills they run, the plans they reuse,
+-- the standards they measure against, and the messages they send.
+-- =====================================================================
+
+-- ---------------------------------------------------------------------
+-- Drill library. Reusable, searchable, and attached to sessions so a
+-- coach stops retyping the same warm-up every week.
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS drills (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  name            TEXT NOT NULL,
+  sport_id        INTEGER REFERENCES sports(id) ON DELETE CASCADE,  -- NULL = any sport
+  category        TEXT NOT NULL DEFAULT 'technical'
+                  CHECK (category IN ('warm_up','technical','tactical','fitness','strength','skills','match_practice','recovery','fielding','goalkeeping')),
+  skill_focus     TEXT,                 -- comma separated: "front foot drive, timing"
+  age_groups      TEXT,                 -- "U14,U16,U18,Senior" — empty means all
+  difficulty      TEXT DEFAULT 'all' CHECK (difficulty IN ('beginner','intermediate','advanced','all')),
+  duration_minutes INTEGER,
+  players_min     INTEGER,
+  players_max     INTEGER,
+  equipment       TEXT,
+  description     TEXT,
+  coaching_points TEXT,                 -- what to watch for, one per line
+  progressions    TEXT,                 -- how to make it harder
+  video_url       TEXT,
+  is_active       INTEGER NOT NULL DEFAULT 1,
+  is_demo         INTEGER NOT NULL DEFAULT 0,
+  created_by      INTEGER REFERENCES users(id),
+  created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (name, sport_id)
+);
+CREATE INDEX IF NOT EXISTS idx_drills_sport ON drills(sport_id, category);
+
+-- A reusable session plan: an ordered set of drills with timings.
+CREATE TABLE IF NOT EXISTS session_templates (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  name            TEXT NOT NULL,
+  sport_id        INTEGER REFERENCES sports(id) ON DELETE CASCADE,
+  training_type   TEXT NOT NULL DEFAULT 'technical',
+  age_group       TEXT,
+  duration_minutes INTEGER,
+  objectives      TEXT,
+  notes           TEXT,
+  is_demo         INTEGER NOT NULL DEFAULT 0,
+  created_by      INTEGER REFERENCES users(id),
+  created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (name, sport_id)
+);
+
+CREATE TABLE IF NOT EXISTS session_template_drills (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  template_id      INTEGER NOT NULL REFERENCES session_templates(id) ON DELETE CASCADE,
+  drill_id         INTEGER NOT NULL REFERENCES drills(id) ON DELETE CASCADE,
+  sort_order       INTEGER NOT NULL DEFAULT 0,
+  duration_minutes INTEGER,
+  notes            TEXT,
+  UNIQUE (template_id, drill_id, sort_order)
+);
+
+-- Drills actually run in a session, with how they went.
+CREATE TABLE IF NOT EXISTS training_session_drills (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id       INTEGER NOT NULL REFERENCES training_sessions(id) ON DELETE CASCADE,
+  drill_id         INTEGER NOT NULL REFERENCES drills(id) ON DELETE CASCADE,
+  sort_order       INTEGER NOT NULL DEFAULT 0,
+  duration_minutes INTEGER,
+  notes            TEXT,
+  UNIQUE (session_id, drill_id, sort_order)
+);
+CREATE INDEX IF NOT EXISTS idx_session_drills ON training_session_drills(session_id);
+
+-- ---------------------------------------------------------------------
+-- Age-group benchmarks. What "good" looks like for a fourteen-year-old
+-- is not what it looks like for a senior, so a raw number means little
+-- on its own. These give every metric a standard to be read against.
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS benchmarks (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  sport_id    INTEGER REFERENCES sports(id) ON DELETE CASCADE,
+  age_group   TEXT NOT NULL,            -- U14, U16, U18, Senior
+  gender      TEXT CHECK (gender IN ('male','female','mixed')),
+  source      TEXT NOT NULL DEFAULT 'career'
+              CHECK (source IN ('career','assessment','fitness')),
+  metric      TEXT NOT NULL,            -- a career stat key, criterion key or fitness measure
+  label       TEXT NOT NULL,
+  unit        TEXT,
+  higher_is_better INTEGER NOT NULL DEFAULT 1,
+  developing  REAL,                     -- below this: developing
+  competent   REAL,                     -- at or above: competent
+  strong      REAL,                     -- at or above: strong
+  exceptional REAL,                     -- at or above: exceptional
+  notes       TEXT,
+  is_demo     INTEGER NOT NULL DEFAULT 0,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (sport_id, age_group, gender, source, metric)
+);
+CREATE INDEX IF NOT EXISTS idx_benchmarks ON benchmarks(sport_id, age_group);
+
+-- ---------------------------------------------------------------------
+-- Announcements. A coach telling a squad that Saturday's session moved
+-- should not require a separate app.
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS announcements (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  title         TEXT NOT NULL,
+  body          TEXT NOT NULL,
+  audience      TEXT NOT NULL DEFAULT 'club'
+                CHECK (audience IN ('club','sport','team','players','coaches')),
+  sport_id      INTEGER REFERENCES sports(id) ON DELETE CASCADE,
+  team_id       INTEGER REFERENCES teams(id) ON DELETE CASCADE,
+  priority      TEXT NOT NULL DEFAULT 'normal' CHECK (priority IN ('normal','important','urgent')),
+  starts_at     TEXT,
+  expires_at    TEXT,
+  attachment_url TEXT,
+  is_demo       INTEGER NOT NULL DEFAULT 0,
+  created_by    INTEGER REFERENCES users(id),
+  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_announcements ON announcements(audience, created_at);
+
+-- Individually addressed recipients, for a message to one athlete or a
+-- named handful rather than a whole squad.
+CREATE TABLE IF NOT EXISTS announcement_recipients (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  announcement_id INTEGER NOT NULL REFERENCES announcements(id) ON DELETE CASCADE,
+  player_id       INTEGER REFERENCES players(id) ON DELETE CASCADE,
+  user_id         INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  read_at         TEXT,
+  UNIQUE (announcement_id, player_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_recipients ON announcement_recipients(announcement_id);
+
+-- =====================================================================
+-- 14. BALL TRACKING, FITNESS AND SELECTION
+--
+-- The measurement layer. A delivery recorded in a match says what
+-- happened; a tracked delivery says exactly where it pitched, how fast
+-- it was released, where it would have hit the stumps, and whether it
+-- landed in the zone the bowler was aiming at.
+--
+-- Where the numbers come from is recorded, not assumed. A coach with a
+-- speed gun and a tape measure produces the same rows as an automated
+-- tracking provider; `source` says which, so nobody has to guess whether
+-- a figure was measured or estimated.
+-- =====================================================================
+
+-- ---------------------------------------------------------------------
+-- A tracking session: a spell in the nets, a bowling-machine block, or
+-- the tracked portion of a match. Deliveries hang off it.
+--
+-- The calibration block records the pitch dimensions the measurements
+-- are relative to. Without it a coordinate in centimetres means nothing,
+-- so it is captured once per session and every delivery inherits it.
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS tracking_sessions (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  sport_id        INTEGER NOT NULL REFERENCES sports(id) ON DELETE CASCADE,
+  mode            TEXT NOT NULL DEFAULT 'nets'
+                  CHECK (mode IN ('nets','bowling_machine','match','fielding','fitness')),
+  title           TEXT NOT NULL,
+  session_date    TEXT NOT NULL,
+  match_id        INTEGER REFERENCES matches(id) ON DELETE SET NULL,
+  training_id     INTEGER REFERENCES training_sessions(id) ON DELETE SET NULL,
+  team_id         INTEGER REFERENCES teams(id) ON DELETE SET NULL,
+  coach_id        INTEGER REFERENCES coaches(id) ON DELETE SET NULL,
+  venue           TEXT,
+  surface         TEXT,                    -- turf, matting, astro, concrete
+  conditions      TEXT,
+
+  -- Scene calibration. Measurements are meaningless without the frame
+  -- they were taken in, so it is stored alongside them.
+  calibrated      INTEGER NOT NULL DEFAULT 0,
+  calibration_method TEXT CHECK (calibration_method IN ('manual','crease_markers','stump_height','provider','none')),
+  pitch_length_cm REAL DEFAULT 2012,       -- 22 yards
+  pitch_width_cm  REAL DEFAULT 305,        -- 10 feet
+  stump_width_cm  REAL DEFAULT 22.86,
+  stump_height_cm REAL DEFAULT 71.1,
+  crease_to_stump_cm REAL DEFAULT 122,
+  calibration_note TEXT,
+
+  -- Bowling machine settings, when that is what is being bowled at.
+  machine_make    TEXT,
+  machine_speed_kph REAL,
+  machine_length  TEXT,
+  machine_line    TEXT,
+  machine_swing   TEXT,
+
+  source          TEXT NOT NULL DEFAULT 'manual'
+                  CHECK (source IN ('manual','speed_gun','provider','imported')),
+  provider        TEXT,
+  notes           TEXT,
+  is_demo         INTEGER NOT NULL DEFAULT 0,
+  created_by      INTEGER REFERENCES users(id),
+  created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_tracking_sessions ON tracking_sessions(session_date DESC);
+
+-- ---------------------------------------------------------------------
+-- One tracked delivery.
+--
+-- Coordinates are in centimetres from a fixed origin: the batter's
+-- stumps at (0,0), x running across the pitch (negative to the leg side
+-- for a right-hander, positive to the off), y running back down the
+-- pitch towards the bowler. That makes a pitch map and a stump-line
+-- reading the same measurement read two ways.
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS deliveries (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id        INTEGER NOT NULL REFERENCES tracking_sessions(id) ON DELETE CASCADE,
+  event_id          INTEGER REFERENCES match_events(id) ON DELETE SET NULL,
+  sequence          INTEGER NOT NULL,
+  over_number       INTEGER,
+  ball_in_over      INTEGER,
+
+  bowler_id         INTEGER REFERENCES players(id) ON DELETE SET NULL,
+  batter_id         INTEGER REFERENCES players(id) ON DELETE SET NULL,
+  batter_handedness TEXT CHECK (batter_handedness IN ('right','left')),
+
+  -- Speed, measured at two points because they answer different questions:
+  -- release speed is the bowler's effort, speed off the pitch is what the
+  -- batter actually faces.
+  release_speed_kph REAL,
+  speed_off_pitch_kph REAL,
+  speed_drop_percent  REAL,               -- derived on write, kept for sorting
+
+  -- Where it pitched, to the centimetre.
+  pitch_x_cm        REAL,                  -- lateral, negative = leg side
+  pitch_y_cm        REAL,                  -- distance from the batter's stumps
+  bounce_height_cm  REAL,
+  length_zone       TEXT CHECK (length_zone IN ('yorker','full_toss','full','good','back_of_length','short')),
+  line_zone         TEXT CHECK (line_zone IN ('wide_outside_off','outside_off','off_stump','middle_stump','leg_stump','down_leg','wide_down_leg')),
+
+  -- Where it would have met the stumps, and whether it would have hit.
+  stump_x_cm        REAL,
+  stump_z_cm        REAL,                  -- height at the stumps
+  hits_stumps       INTEGER,               -- 1 hit, 0 miss, NULL not assessed
+  stump_hit         TEXT CHECK (stump_hit IN ('off','middle','leg','bails','miss_off','miss_leg','over','under')),
+
+  -- Movement.
+  deviation_deg     REAL,                  -- off the pitch
+  swing_deg         REAL,                  -- in the air
+  spin_rpm          REAL,
+  release_height_cm REAL,
+  delivery_type     TEXT,
+
+  -- Was it where the bowler was aiming?
+  target_line       TEXT,
+  target_length     TEXT,
+  in_target         INTEGER,               -- 1 hit the zone, 0 missed, NULL no target set
+  distance_from_target_cm REAL,
+
+  outcome           TEXT,
+  runs              INTEGER,
+  wicket            INTEGER NOT NULL DEFAULT 0,
+  machine_delivery  INTEGER NOT NULL DEFAULT 0,
+  trajectory_json   TEXT,                  -- sampled points, when a provider supplies them
+  source            TEXT NOT NULL DEFAULT 'manual'
+                    CHECK (source IN ('manual','speed_gun','provider','imported')),
+  notes             TEXT,
+  created_at        TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_deliveries_session ON deliveries(session_id, sequence);
+CREATE INDEX IF NOT EXISTS idx_deliveries_bowler ON deliveries(bowler_id);
+CREATE INDEX IF NOT EXISTS idx_deliveries_batter ON deliveries(batter_id);
+
+-- ---------------------------------------------------------------------
+-- The zone a bowler is working on. Consistency is measured against a
+-- stated target, so the target is stored rather than inferred after the
+-- fact from where the balls happened to land.
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS consistency_targets (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  player_id      INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+  sport_id       INTEGER NOT NULL REFERENCES sports(id) ON DELETE CASCADE,
+  session_id     INTEGER REFERENCES tracking_sessions(id) ON DELETE CASCADE,
+  name           TEXT NOT NULL,
+  line_zone      TEXT NOT NULL,
+  length_zone    TEXT NOT NULL,
+  -- The zone as a rectangle in centimetres, so "in the zone" is a
+  -- measurement rather than an opinion.
+  x_min_cm       REAL,
+  x_max_cm       REAL,
+  y_min_cm       REAL,
+  y_max_cm       REAL,
+  tolerance_cm   REAL DEFAULT 30,
+  active         INTEGER NOT NULL DEFAULT 1,
+  is_demo        INTEGER NOT NULL DEFAULT 0,
+  created_by     INTEGER REFERENCES users(id),
+  created_at     TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_targets_player ON consistency_targets(player_id, active);
+
+-- ---------------------------------------------------------------------
+-- Fitness: workouts, strength numbers and conditioning tests, so the
+-- physical side of an athlete's record sits beside the playing side.
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS fitness_records (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  player_id     INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+  record_date   TEXT NOT NULL,
+  kind          TEXT NOT NULL DEFAULT 'test'
+                CHECK (kind IN ('test','workout','measurement')),
+  category      TEXT NOT NULL DEFAULT 'conditioning'
+                CHECK (category IN ('speed','strength','endurance','power','mobility','conditioning','body')),
+  metric        TEXT NOT NULL,            -- sprint_20m, bench_press_1rm, yo_yo_level…
+  label         TEXT NOT NULL,
+  value         REAL NOT NULL,
+  unit          TEXT,
+  higher_is_better INTEGER NOT NULL DEFAULT 1,
+  -- Workout detail, when this row is a logged session rather than a test.
+  exercise      TEXT,
+  sets          INTEGER,
+  reps          INTEGER,
+  load_kg       REAL,
+  duration_minutes INTEGER,
+  rpe           REAL,                     -- perceived exertion, 1–10
+  coach_id      INTEGER REFERENCES coaches(id) ON DELETE SET NULL,
+  notes         TEXT,
+  is_demo       INTEGER NOT NULL DEFAULT 0,
+  created_by    INTEGER REFERENCES users(id),
+  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_fitness_player ON fitness_records(player_id, record_date DESC);
+CREATE INDEX IF NOT EXISTS idx_fitness_metric ON fitness_records(metric);
+
+-- ---------------------------------------------------------------------
+-- Assessment templates: a named set of criteria a coach reuses for
+-- trials or a seasonal review, rather than picking from the full list
+-- every time.
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS assessment_templates (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  name        TEXT NOT NULL,
+  sport_id    INTEGER REFERENCES sports(id) ON DELETE CASCADE,
+  age_group   TEXT,
+  purpose     TEXT NOT NULL DEFAULT 'review'
+              CHECK (purpose IN ('trial','review','selection','induction','return_from_injury')),
+  description TEXT,
+  is_active   INTEGER NOT NULL DEFAULT 1,
+  is_demo     INTEGER NOT NULL DEFAULT 0,
+  created_by  INTEGER REFERENCES users(id),
+  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (name, sport_id)
+);
+
+CREATE TABLE IF NOT EXISTS assessment_template_criteria (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  template_id INTEGER NOT NULL REFERENCES assessment_templates(id) ON DELETE CASCADE,
+  criteria_id INTEGER NOT NULL REFERENCES assessment_criteria(id) ON DELETE CASCADE,
+  sort_order  INTEGER NOT NULL DEFAULT 0,
+  weight      REAL NOT NULL DEFAULT 1,
+  UNIQUE (template_id, criteria_id)
 );

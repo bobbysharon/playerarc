@@ -19,12 +19,14 @@ import Training from './pages/Training';
 import TrainingDetail from './pages/TrainingDetail';
 import Assessments from './pages/Assessments';
 import Achievements from './pages/Achievements';
-import Messages from './pages/Messages';
-import Showcase from './pages/Showcase';
 import Rankings from './pages/Rankings';
 import Reports from './pages/Reports';
 import Sports from './pages/Sports';
 import Settings from './pages/Settings';
+import Drills from './pages/Drills';
+import Tracking from './pages/Tracking';
+import Announcements from './pages/Announcements';
+import Showcase from './pages/Showcase';
 import UserManager from './pages/UserManager';
 import ChangePassword from './pages/ChangePassword';
 
@@ -42,6 +44,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+      {/* Public: the link is the credential, so no sign-in and no shell. */}
       <Route path="/showcase/:token" element={<Showcase />} />
       <Route path="/" element={<Protected><Dashboard /></Protected>} />
       <Route path="/players" element={<Protected><Players /></Protected>} />
@@ -56,11 +59,13 @@ export default function App() {
       <Route path="/matches/:id" element={<Protected><MatchDetail /></Protected>} />
       <Route path="/matches/:id/analysis" element={<Protected><MatchAnalysis /></Protected>} />
       <Route path="/matches/:id/scoring" element={<Protected><MatchScoring /></Protected>} />
+      <Route path="/drills" element={<Protected><Drills /></Protected>} />
+      <Route path="/tracking" element={<Protected><Tracking /></Protected>} />
+      <Route path="/announcements" element={<Protected><Announcements /></Protected>} />
       <Route path="/training" element={<Protected><Training /></Protected>} />
       <Route path="/training/:id" element={<Protected><TrainingDetail /></Protected>} />
       <Route path="/assessments" element={<Protected><Assessments /></Protected>} />
       <Route path="/achievements" element={<Protected><Achievements /></Protected>} />
-      <Route path="/messages" element={<Protected><Messages /></Protected>} />
       <Route path="/rankings" element={<Protected><Rankings /></Protected>} />
       <Route path="/reports" element={<Protected><Reports /></Protected>} />
       <Route path="/sports" element={<Protected><Sports /></Protected>} />

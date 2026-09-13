@@ -1,5 +1,6 @@
 'use strict';
 const express = require('express');
+const crypto = require('crypto');
 const { z } = require('zod');
 const { db, parseJson, tx } = require('../db');
 const { requireAuth, requirePermission } = require('../middleware/auth');
@@ -10,6 +11,7 @@ const { redactPlayer, can } = require('../lib/permissions');
 const { nextAthleteId } = require('../lib/ids');
 const timeline = require('../lib/timeline');
 const { getSport, playerCareer, playerCareerAllSports, playerSummary } = require('../lib/repo');
+const config = require('../config');
 
 const router = express.Router();
 
@@ -546,32 +548,114 @@ router.put('/:id/staff/:assignmentId', requirePermission('players.write'), async
   res.json({ ok: true });
 }));
 
+
 /* ------------------------------------------------------------------ */
-/* Showcase profile — a public, read-only, video-free share link        */
-/* Cricket only for now: see routes/showcase.js for the public reader. */
+/* Showcase profile — a shareable record for selectors                  */
 /* ------------------------------------------------------------------ */
-router.patch('/:id/showcase', requirePermission('players.write'), asyncHandler(async (req, res) => {
-  const player = db.prepare('SELECT * FROM players WHERE id = ?').get(req.params.id);
-  if (!player) throw new ApiError(404, 'That player does not exist.');
+
+/**
+ * Turn the showcase on, off, or reissue its link.
+ *
+ * The link is what makes the profile reachable, so revoking access means
+ * clearing the token rather than hoping nobody kept the URL. Turning the
+ * showcase off does exactly that.
+ */
+router.put('/:id/showcase', requirePermission('players.write'), asyncHandler(async (req, res) => {
+  const player = loadPlayer(req.params.id);
   guard(req, player.id);
-
-  const cricketSport = db.prepare("SELECT id FROM sports WHERE code = 'cricket'").get();
-  const playsCricket = cricketSport && db.prepare('SELECT 1 FROM player_sports WHERE player_id = ? AND sport_id = ?').get(player.id, cricketSport.id);
-  if (!playsCricket) throw new ApiError(422, 'A showcase profile is currently available for cricket players only.');
-
-  const schema = z.object({ enabled: z.coerce.boolean(), regenerate: z.coerce.boolean().optional() });
+  const schema = z.object({
+    enabled: z.coerce.boolean(),
+    headline: z.string().max(280).optional().nullable(),
+    regenerate: z.coerce.boolean().default(false),
+  });
   const body = schema.parse(req.body);
 
   let token = player.showcase_token;
-  if (body.enabled && (!token || body.regenerate)) {
-    token = require('crypto').randomBytes(16).toString('hex');
+  if (!body.enabled) {
+    token = null;                                    // the old link stops working
+  } else if (!token || body.regenerate) {
+    token = crypto.randomBytes(12).toString('base64url');
   }
-  if (!body.enabled) token = body.regenerate ? null : token;
 
-  db.prepare(`UPDATE players SET showcase_enabled = ?, showcase_token = ?, updated_at = datetime('now') WHERE id = ?`)
-    .run(body.enabled ? 1 : 0, token, player.id);
-  audit(req, { action: 'update', entity: 'players', entityId: player.id, summary: `Showcase profile ${body.enabled ? 'enabled' : 'disabled'} for ${player.athlete_id}` });
-  res.json({ showcase_enabled: body.enabled ? 1 : 0, showcase_token: body.enabled ? token : null });
+  db.prepare(`UPDATE players SET showcase_enabled = ?, showcase_token = ?, showcase_headline = ?,
+              showcase_updated_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`)
+    .run(body.enabled ? 1 : 0, token, body.headline ?? player.showcase_headline ?? null, player.id);
+
+  audit(req, {
+    action: 'update', entity: 'players', entityId: player.id,
+    summary: `Showcase ${body.enabled ? (body.regenerate ? 'link reissued' : 'enabled') : 'disabled'} for ${player.athlete_id}`,
+  });
+
+  res.json({
+    enabled: body.enabled,
+    token,
+    path: token ? `/showcase/${token}` : null,
+  });
+}));
+
+/**
+ * The public showcase. No authentication: the token is the credential.
+ *
+ * It carries what a selector would want — the career record, honours, current
+ * squads and any clips marked as highlights — and nothing that is nobody
+ * else's business. Contact details, guardians, documents, assessments and
+ * coach notes are all left out by construction rather than by filtering, so a
+ * change elsewhere cannot accidentally expose them.
+ */
+router.get('/showcase/:token', asyncHandler(async (req, res) => {
+  const player = db
+    .prepare('SELECT * FROM players WHERE showcase_token = ? AND showcase_enabled = 1')
+    .get(req.params.token);
+  if (!player) throw new ApiError(404, 'That showcase profile is not available. The link may have been withdrawn.');
+
+  const careers = playerCareerAllSports(player.id).map((c) => ({
+    sport: c.sport,
+    matchesPlayed: c.matchesPlayed,
+    headline: c.headline,
+    rating: c.rating ? { overall: c.rating.overall, components: c.rating.components } : null,
+    career: { groups: c.career.groups },
+  }));
+
+  const teams = db
+    .prepare(`SELECT t.name, t.age_group, t.level, s.name AS sport_name, tm.start_date, tm.end_date, tm.role
+              FROM team_memberships tm JOIN teams t ON t.id = tm.team_id JOIN sports s ON s.id = t.sport_id
+              WHERE tm.player_id = ? ORDER BY tm.end_date IS NOT NULL, tm.start_date DESC`)
+    .all(player.id);
+
+  const achievements = db
+    .prepare(`SELECT a.title, a.category, a.level, a.awarded_date, a.description, s.name AS sport_name, t.name AS tournament_name
+              FROM achievements a LEFT JOIN sports s ON s.id = a.sport_id LEFT JOIN tournaments t ON t.id = a.tournament_id
+              WHERE a.player_id = ? ORDER BY a.awarded_date DESC`)
+    .all(player.id);
+
+  const milestones = db
+    .prepare(`SELECT event_date, event_type, title, description FROM player_timeline
+              WHERE player_id = ? AND importance = 3 ORDER BY event_date DESC LIMIT 30`)
+    .all(player.id);
+
+  audit(req, { action: 'download', entity: 'players', entityId: player.id, summary: `Showcase profile viewed for ${player.athlete_id}` });
+
+  res.json({
+    athlete: {
+      athleteId: player.athlete_id,
+      name: player.display_name || `${player.first_name} ${player.last_name}`,
+      headline: player.showcase_headline,
+      photoUrl: player.photo_url,
+      nationality: player.nationality,
+      dob: player.dob,
+      preferredHand: player.preferred_hand,
+      preferredFoot: player.preferred_foot,
+      heightCm: player.height_cm,
+      registeredSince: player.registration_date,
+      club: config.club.name,
+      updatedAt: player.showcase_updated_at,
+    },
+    summary: playerSummary(player.id),
+    careers,
+    teams,
+    achievements,
+    milestones,
+  });
 }));
 
 module.exports = router;

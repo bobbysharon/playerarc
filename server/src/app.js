@@ -31,19 +31,13 @@ app.use('/api/teams', require('./routes/teams'));
 app.use('/api/coaches', require('./routes/coaches'));
 app.use('/api', require('./routes/competitions'));      // /tournaments, /matches
 app.use('/api', require('./routes/match-events'));      // ball-by-ball capture and analysis
+app.use('/api', require('./routes/academy'));          // drills, session plans, benchmarks, announcements
+app.use('/api', require('./routes/tracking'));         // ball tracking, fitness, templates, selection
 app.use('/api/training', require('./routes/training'));
 app.use('/api/assessments', require('./routes/assessments'));
 app.use('/api/achievements', require('./routes/achievements'));
 app.use('/api/media', require('./routes/media'));
 app.use('/api/admin', require('./routes/admin'));
-// Cricket-only Ludimos-style additions: benchmarks, drill library, digital
-// groups and messaging. /api/showcase is public (no requireAuth) by design —
-// it is the shareable read-only athlete resume link.
-app.use('/api/benchmarks', require('./routes/benchmarks'));
-app.use('/api/drills', require('./routes/drills'));
-app.use('/api/groups', require('./routes/groups'));
-app.use('/api/messages', require('./routes/messages'));
-app.use('/api/showcase', require('./routes/showcase'));
 app.use('/api', require('./routes/analytics'));         // /dashboard, /search, /rankings, /reports, /export
 
 // Serve the built web app in production; the API keeps its own 404 handler.

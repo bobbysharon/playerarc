@@ -132,3 +132,76 @@
 .scroll-thin::-webkit-scrollbar-track { background: transparent; }
 .scroll-thin::-webkit-scrollbar-thumb { background: #1E293B; border-radius: 8px; }
 .scroll-thin::-webkit-scrollbar-thumb:hover { background: #2A3A52; }
+
+/* ------------------------------------------------------------------ */
+/* Tracker HUD                                                         */
+/*                                                                     */
+/* The ball-tracking screen is read at a glance, often on a phone at   */
+/* the side of a net. These give it the instrument-panel feel: a faint */
+/* grid behind the gauges, a soft glow on live figures, and a sweep    */
+/* that runs once when a panel loads so the eye lands on it.           */
+/* ------------------------------------------------------------------ */
+@layer components {
+  .hud-panel {
+    @apply relative overflow-hidden rounded-2xl border border-line bg-surface;
+    background-image:
+      linear-gradient(rgba(245, 158, 11, 0.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(245, 158, 11, 0.035) 1px, transparent 1px);
+    background-size: 22px 22px;
+  }
+
+  .hud-panel::before {
+    content: '';
+    @apply pointer-events-none absolute inset-0;
+    background: radial-gradient(120% 80% at 50% 0%, rgba(245, 158, 11, 0.10), transparent 60%);
+  }
+
+  .hud-corner::after {
+    content: '';
+    @apply pointer-events-none absolute inset-0 rounded-2xl;
+    background:
+      linear-gradient(to right, #F59E0B 2px, transparent 2px) 0 0 / 18px 2px no-repeat,
+      linear-gradient(to bottom, #F59E0B 2px, transparent 2px) 0 0 / 2px 18px no-repeat,
+      linear-gradient(to left, #F59E0B 2px, transparent 2px) 100% 100% / 18px 2px no-repeat,
+      linear-gradient(to top, #F59E0B 2px, transparent 2px) 100% 100% / 2px 18px no-repeat;
+    opacity: 0.55;
+  }
+
+  .hud-readout {
+    @apply font-display leading-none tracking-tight;
+    text-shadow: 0 0 18px rgba(245, 158, 11, 0.45);
+  }
+
+  .hud-label {
+    @apply text-[10px] uppercase tracking-[0.22em] text-ink-400;
+  }
+}
+
+@keyframes hud-sweep {
+  from { transform: translateY(-100%); opacity: 0.65; }
+  to { transform: translateY(320%); opacity: 0; }
+}
+
+.hud-sweep {
+  animation: hud-sweep 1.5s ease-out 1;
+}
+
+@keyframes hud-pulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 0.9; }
+}
+
+.hud-pulse { animation: hud-pulse 2.4s ease-in-out infinite; }
+
+/* Deliveries fade in as the map draws, so a busy plot does not appear
+   all at once. */
+@keyframes hud-dot {
+  from { opacity: 0; transform: scale(0.3); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.hud-dot { animation: hud-dot 320ms ease-out both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .hud-sweep, .hud-pulse, .hud-dot { animation: none; }
+}

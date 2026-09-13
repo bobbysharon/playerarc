@@ -72,7 +72,15 @@ function loadPlayers(matchId) {
  */
 function refreshPerformances(match, sport, userId) {
   const events = loadEvents(match.id);
-  if (!events.length) return { updated: 0 };
+  if (!events.length) return { updated: 0, replacedTyped: 0 };
+
+  // Once a match is scored ball by ball, the events are the source of truth for
+  // everything they can produce. If a scorecard was typed first, the derivable
+  // figures in it are replaced — otherwise the same runs would be counted twice,
+  // once from the summary and once from the deliveries. That is the right rule,
+  // but it is destructive, so callers are told when it happens rather than
+  // finding out from a career average that quietly changed.
+  let replacedTyped = 0;
 
   const derived = derivePerformances(sport.config, events);
   const derivableStats = new Set((sport.config.events?.derive || []).map((r) => r.stat));
@@ -95,9 +103,17 @@ function refreshPerformances(match, sport, userId) {
 
       // Start from what is already there, drop the derivable keys, then layer
       // the freshly derived values on top.
-      const merged = { ...parseJson(existing?.stats_json, {}) };
+      const previous = parseJson(existing?.stats_json, {});
+      const hadTyped = Object.keys(previous).some((k) => derivableStats.has(k));
+      const merged = { ...previous };
       for (const key of derivableStats) delete merged[key];
       Object.assign(merged, stats);
+
+      // Only a genuine change counts: re-deriving the same numbers is not a loss.
+      if (hadTyped && derivableStats.size
+          && [...derivableStats].some((k) => previous[k] !== undefined && previous[k] !== merged[k])) {
+        replacedTyped += 1;
+      }
 
       upsert.run({
         match_id: match.id,
@@ -120,7 +136,7 @@ function refreshPerformances(match, sport, userId) {
     }
   });
 
-  return { updated };
+  return { updated, replacedTyped };
 }
 
 /* ------------------------------------------------------------------ */
@@ -321,7 +337,7 @@ router.post('/matches/:id/events', requirePermission('performances.write'), asyn
     body.outcome ?? null, JSON.stringify(payload), body.commentary ?? null, req.user.id,
   );
 
-  const { updated } = refreshPerformances(match, sport, req.user.id);
+  const { updated, replacedTyped } = refreshPerformances(match, sport, req.user.id);
 
   // A century, a five-for or a hat-trick recorded ball by ball reaches the
   // athlete's timeline the same way a typed scorecard would.
@@ -347,6 +363,10 @@ router.post('/matches/:id/events', requirePermission('performances.write'), asyn
     },
     performancesUpdated: updated,
     milestones,
+    replacedTypedScorecard: replacedTyped,
+    warning: replacedTyped
+      ? `This match already had a scorecard entered by hand. Now that it is being scored ball by ball, the deliveries are the source of truth, so ${replacedTyped} athlete${replacedTyped === 1 ? "'s" : "s'"} figures have been recomputed from the events. Keep recording and they will fill back in.`
+      : null,
   });
 }));
 

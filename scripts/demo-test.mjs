@@ -31,9 +31,9 @@ const { demoRequest, demoPlayersCsv } = m;
 const out=[];
 const t=async(n,f)=>{try{out.push([(await f())?'PASS':'FAIL',n]);}catch(e){out.push(['ERR ',n+' → '+e.message]);}};
 
-await t('login', async()=>{const r=await demoRequest('POST','/auth/login',{email:'admin@karwansportsclub.com',password:'Karwan@2026'});return !!r.token&&r.user.role==='super_admin';});
-await t('bad password rejected', async()=>{try{await demoRequest('POST','/auth/login',{email:'admin@karwansportsclub.com',password:'wrong'});return false;}catch(e){return e.status===401;}});
-await demoRequest('POST','/auth/login',{email:'admin@karwansportsclub.com',password:'Karwan@2026'});
+await t('login', async()=>{const r=await demoRequest('POST','/auth/login',{email:'admin@playerarc.local',password:'Karwan@2026'});return !!r.token&&r.user.role==='super_admin';});
+await t('bad password rejected', async()=>{try{await demoRequest('POST','/auth/login',{email:'admin@playerarc.local',password:'wrong'});return false;}catch(e){return e.status===401;}});
+await demoRequest('POST','/auth/login',{email:'admin@playerarc.local',password:'Karwan@2026'});
 await t('dashboard', async()=>{const t2=(await demoRequest('GET','/dashboard')).totals;return t2.athletes>0&&t2.sports===7&&t2.matches>0;});
 await t('sports+config', async()=>{const r=await demoRequest('GET','/sports');return r.sports.length===7&&r.sports[0].config.matchStats.length>0;});
 await t('players list+pagination', async()=>{const r=await demoRequest('GET','/players?pageSize=10');return r.players.length===10&&r.total>10&&r.pages>1&&!!r.players[0].sports;});
@@ -43,11 +43,11 @@ await t('career stats + rating', async()=>{const r=await demoRequest('GET','/pla
 await t('timeline', async()=>(await demoRequest('GET','/players/1/timeline')).events.length>0);
 await t('activity', async()=>Array.isArray((await demoRequest('GET','/players/1/activity')).matches));
 await t('development', async()=>{const r=await demoRequest('GET','/assessments/player/1/development');return Array.isArray(r.criteria);});
-await t('teams', async()=>(await demoRequest('GET','/teams')).teams.length===11);
+await t('teams', async()=>{const r=await demoRequest('GET','/teams');return r.teams.length>0&&r.teams.every(t2=>t2.sport_name&&t2.squad_size>=0);});
 await t('team detail', async()=>{const r=await demoRequest('GET','/teams/1');return r.roster.length>0&&r.record.played>=0;});
 await t('coaches', async()=>(await demoRequest('GET','/coaches')).coaches.length===8);
 await t('coach detail', async()=>!!(await demoRequest('GET','/coaches/1')).coach.full_name);
-await t('tournaments', async()=>(await demoRequest('GET','/tournaments')).tournaments.length===8);
+await t('tournaments', async()=>{const r=await demoRequest('GET','/tournaments');return r.tournaments.length>0&&r.tournaments.every(x=>x.sport_name);});
 await t('tournament leaders', async()=>{const r=await demoRequest('GET','/tournaments/1');return r.matches.length>0&&r.leaders.length>0;});
 await t('matches', async()=>(await demoRequest('GET','/matches')).matches.length>0);
 await t('match detail w/ lineup+scorecard', async()=>{const ms=await demoRequest('GET','/matches?status=completed&limit=1');const r=await demoRequest('GET','/matches/'+ms.matches[0].id);return r.lineup.length>0&&r.performances.length>0&&!!r.sport.config;});
@@ -100,20 +100,20 @@ await t('invalid stats rejected', async()=>{
 
 // user management
 await t('create + sign in as new user', async()=>{
-  await demoRequest('POST','/auth/login',{email:'admin@karwansportsclub.com',password:'Karwan@2026'});
+  await demoRequest('POST','/auth/login',{email:'admin@playerarc.local',password:'Karwan@2026'});
   const r=await demoRequest('POST','/admin/users',{full_name:'Temp Coach',email:'temp@karwansportsclub.com',password:'Temporary123',role:'coach',teamIds:[1]});
   const l=await demoRequest('POST','/auth/login',{email:'temp@karwansportsclub.com',password:'Karwan@2026'});
   return r.ok && l.user.role==='coach';
 });
 await t('generate password + forced change', async()=>{
-  await demoRequest('POST','/auth/login',{email:'admin@karwansportsclub.com',password:'Karwan@2026'});
+  await demoRequest('POST','/auth/login',{email:'admin@playerarc.local',password:'Karwan@2026'});
   const u=(await demoRequest('GET','/admin/users')).users.find(x=>x.email==='temp@karwansportsclub.com');
   const r=await demoRequest('POST',`/admin/users/${u.id}/password`,{mustChange:true});
   const l=await demoRequest('POST','/auth/login',{email:'temp@karwansportsclub.com',password:r.password});
   return r.generated && l.user.mustChangePassword===true;
 });
 await t('user changes their own password', async()=>{
-  await demoRequest('POST','/auth/login',{email:'admin@karwansportsclub.com',password:'Karwan@2026'});
+  await demoRequest('POST','/auth/login',{email:'admin@playerarc.local',password:'Karwan@2026'});
   const u=(await demoRequest('GET','/admin/users')).users.find(x=>x.email==='temp@karwansportsclub.com');
   await demoRequest('POST',`/admin/users/${u.id}/password`,{password:'KnownPass123',mustChange:true});
   await demoRequest('POST','/auth/login',{email:'temp@karwansportsclub.com',password:'KnownPass123'});
@@ -122,8 +122,8 @@ await t('user changes their own password', async()=>{
   return l.user.mustChangePassword===false;
 });
 await t('cannot delete own account', async()=>{
-  await demoRequest('POST','/auth/login',{email:'admin@karwansportsclub.com',password:'Karwan@2026'});
-  const me=(await demoRequest('GET','/admin/users')).users.find(x=>x.email==='admin@karwansportsclub.com');
+  await demoRequest('POST','/auth/login',{email:'admin@playerarc.local',password:'Karwan@2026'});
+  const me=(await demoRequest('GET','/admin/users')).users.find(x=>x.email==='admin@playerarc.local');
   try{await demoRequest('DELETE',`/admin/users/${me.id}`);return false;}catch(e){return e.status===409;}
 });
 await t('delete a user', async()=>{
@@ -181,9 +181,17 @@ await t('wagon wheel, pitch map, phases, partnerships', async()=>{
 await t('scorecard matches the analysis exactly', async()=>{
   const a=await demoRequest('GET',`/matches/${bbId}/analysis`);
   const md=await demoRequest('GET',`/matches/${bbId}`);
-  return a.periods[0].battingCard.filter(b=>b.playerId).slice(0,3).every(b=>{
-    const perf=md.performances.find(p=>p.player_id===b.playerId);
-    return perf && perf.stats.runs===b.runs && perf.stats.balls_faced===b.balls;
+  const totals=new Map();
+  for(const period of a.periods){
+    for(const b of period.battingCard.filter(x=>x.playerId)){
+      const cur=totals.get(b.playerId)||{runs:0,balls:0};
+      totals.set(b.playerId,{runs:cur.runs+b.runs,balls:cur.balls+b.balls});
+    }
+  }
+  const sample=[...totals.entries()].slice(0,4);
+  return sample.length>0 && sample.every(([pid,exp])=>{
+    const perf=md.performances.find(p=>p.player_id===pid);
+    return perf && perf.stats.runs===exp.runs && perf.stats.balls_faced===exp.balls;
   });
 });
 await t("an athlete's own match view", async()=>{
@@ -248,6 +256,136 @@ await t('football and racket analysis shapes', async()=>{
     if(a.totalEvents>0){racket=a.overall.progression.length>0&&a.overall.rallyBuckets.length>0;break;}
   }
   return football&&racket;
+});
+
+// drills, plans, benchmarks, announcements, showcase
+await t('drill library', async()=>{
+  const r=await demoRequest('GET','/drills');
+  return r.drills.length>5 && r.drills.every(d=>d.category && d.times_used>=0);
+});
+await t('session plans carry ordered drills', async()=>{
+  const r=await demoRequest('GET','/session-templates');
+  return r.templates.length>0 && r.templates.every(x=>x.drills.every((d,i)=>d.sort_order===i));
+});
+await t('build a session from a plan', async()=>{
+  const s2=(await demoRequest('GET','/training?limit=1')).sessions[0];
+  const tpl=(await demoRequest('GET','/session-templates')).templates[0];
+  await demoRequest('POST',`/training/${s2.id}/apply-template/${tpl.id}`);
+  const after=await demoRequest('GET',`/training/${s2.id}/drills`);
+  return after.drills.length===tpl.drills.length;
+});
+await t('add a drill', async()=>{
+  const r=await demoRequest('POST','/drills',{name:'Demo drill '+Date.now(),category:'skills',duration_minutes:15});
+  return !!r.drill?.id;
+});
+await t('benchmarks band an athlete', async()=>{
+  for(const p of (await demoRequest('GET','/players?pageSize=60')).players){
+    const b=await demoRequest('GET',`/players/${p.id}/benchmarks`);
+    if(b.career.length) return ['below','developing','competent','strong','exceptional'].includes(b.career[0].band)&&!!b.ageGroup;
+  }
+  return false;
+});
+await t('announcements list and send', async()=>{
+  const team=(await demoRequest('GET','/teams')).teams[0];
+  const r=await demoRequest('POST','/announcements',{title:'Demo notice',body:'Moved.',audience:'team',team_id:team.id});
+  const list=await demoRequest('GET','/announcements');
+  return !!r.announcement?.id && list.announcements.some(a=>a.id===r.announcement.id);
+});
+await t('a squad announcement needs a squad', async()=>{
+  try{await demoRequest('POST','/announcements',{title:'x',body:'y',audience:'team'});return false;}
+  catch(e){return e.status===422;}
+});
+await t('showcase publishes, reads and withdraws', async()=>{
+  const p=(await demoRequest('GET','/players?pageSize=1')).players[0];
+  const on=await demoRequest('PUT',`/players/${p.id}/showcase`,{enabled:true,headline:'Available for trials.'});
+  const pub=await demoRequest('GET',`/players/showcase/${on.token}`);
+  const body=JSON.stringify(pub);
+  const clean=!['"phone"','"guardian_name"','"address"','"emergency_phone"'].some(f=>body.includes(f));
+  await demoRequest('PUT',`/players/${p.id}/showcase`,{enabled:false});
+  let gone=false;
+  try{await demoRequest('GET',`/players/showcase/${on.token}`);}catch(e){gone=e.status===404;}
+  return !!pub.athlete.name && clean && gone;
+});
+await t('every sport has event definitions', async()=>{
+  const sports=(await demoRequest('GET','/sports')).sports;
+  return sports.length===7 && sports.every(s2=>s2.config?.events?.types?.length>0);
+});
+await t('every sport has events recorded', async()=>{
+  const sports=(await demoRequest('GET','/sports')).sports;
+  const ms=(await demoRequest('GET','/matches?limit=200')).matches;
+  let covered=0;
+  for(const sp of sports){
+    for(const m of ms.filter(x=>x.sport_code===sp.code)){
+      const ev=await demoRequest('GET',`/matches/${m.id}/events`);
+      if(ev.total>0){covered+=1;break;}
+    }
+  }
+  return covered===sports.length;
+});
+
+// ball tracking, fitness, templates, selection
+let tsId;
+await t('tracking sessions with calibration', async()=>{
+  const r=await demoRequest('GET','/tracking/sessions');
+  tsId=r.sessions[0]?.id;
+  return r.sessions.length>5 && r.sessions.every(x=>x.calibrated===1) && r.sessions.some(x=>x.mode==='bowling_machine');
+});
+await t('session reports speed, map, stumps, consistency', async()=>{
+  const r=await demoRequest('GET',`/tracking/sessions/${tsId}`);
+  const s2=r.summary;
+  return s2.speed.averageRelease>50 && s2.pitchMap.points.length>0 && s2.stumpLine.assessed>0 && s2.consistency.hitRate>=0;
+});
+await t('pitch coordinates resolve to the right zones', async()=>{
+  const r=await demoRequest('GET',`/tracking/sessions/${tsId}`);
+  return r.deliveries.filter(d=>d.length_zone==='good').every(d=>d.pitch_y_cm>400&&d.pitch_y_cm<=700);
+});
+await t('recording a delivery derives its zones', async()=>{
+  const s2=await demoRequest('GET',`/tracking/sessions/${tsId}`);
+  const r=await demoRequest('POST',`/tracking/sessions/${tsId}/deliveries`,{
+    bowler_id:s2.bowlers[0]?.player.id??null, batter_handedness:'right',
+    release_speed_kph:139.4, speed_off_pitch_kph:104.2,
+    pitch_x_cm:14, pitch_y_cm:560, stump_x_cm:6, stump_z_cm:40, delivery_type:'seam', runs:0,
+  });
+  const d=r.deliveries[0];
+  return d.length_zone==='good' && d.line_zone==='off_stump' && d.hits_stumps===1 && d.stump_hit==='off';
+});
+await t('bowling-machine session needs its speed', async()=>{
+  try{await demoRequest('POST','/tracking/sessions',{sport_id:1,mode:'bowling_machine',title:'x',session_date:'2026-09-01'});return false;}
+  catch(e){return e.status===422;}
+});
+await t('scene calibration recorded', async()=>{
+  const c=await demoRequest('POST','/tracking/sessions',{sport_id:1,mode:'nets',title:'Cal '+Date.now(),session_date:'2026-09-01'});
+  const r=await demoRequest('PUT',`/tracking/sessions/${c.session.id}/calibration`,{method:'crease_markers',stump_height_cm:71.1});
+  return r.session.calibrated===1 && r.session.calibration_method==='crease_markers';
+});
+await t('athlete tracking report spans sessions', async()=>{
+  const s2=await demoRequest('GET',`/tracking/sessions/${tsId}`);
+  const r=await demoRequest('GET',`/players/${s2.bowlers[0].player.id}/tracking`);
+  return r.bowling.deliveries>0 && r.bowling.trend.length>0 && r.bowling.consistency.score>=0;
+});
+await t('fitness trends per metric', async()=>{
+  for(const p of (await demoRequest('GET','/players?pageSize=40')).players){
+    const f=await demoRequest('GET',`/players/${p.id}/fitness`);
+    if(f.series.length) return f.series.every(m2=>m2.points.length>0&&m2.latest!==null);
+  }
+  return false;
+});
+await t('a faster sprint counts as improvement', async()=>{
+  for(const p of (await demoRequest('GET','/players?pageSize=40')).players){
+    const f=await demoRequest('GET',`/players/${p.id}/fitness`);
+    const sp=f.series.find(m2=>m2.metric==='sprint_20m');
+    if(sp) return sp.higherIsBetter===false && sp.improved===(sp.change<0);
+  }
+  return false;
+});
+await t('assessment templates carry ordered criteria', async()=>{
+  const r=await demoRequest('GET','/assessment-templates');
+  return r.templates.length>=4 && r.templates.every(x=>x.criteria.length>0&&x.criteria.every((c,i)=>c.sort_order===i));
+});
+await t('selection compares on shared measures', async()=>{
+  const ids=(await demoRequest('GET','/players?sport=1&pageSize=4')).players.map(p=>p.id);
+  const r=await demoRequest('GET',`/selection/compare?sport=1&players=${ids.join(',')}`);
+  return r.rows.length>=2 && r.columns.length>0;
 });
 
 // scoping

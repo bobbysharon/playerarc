@@ -49,6 +49,20 @@ jobs:
       - name: Add .nojekyll
         run: touch web/dist/.nojekyll
 
+      # A Pages deployment whose root has no index.html publishes a 404 and
+      # still reports success. Fail here instead, where the cause is visible.
+      - name: Check the build produced a site
+        run: |
+          if [ ! -f web/dist/index.html ]; then
+            echo "::error::web/dist/index.html is missing - the demo build produced no site."
+            ls -la web/dist || echo "web/dist does not exist"
+            exit 1
+          fi
+          echo "Publishing these files:"
+          ls -la web/dist
+          echo "Asset references:"
+          grep -o 'src="[^"]*"' web/dist/index.html || true
+
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

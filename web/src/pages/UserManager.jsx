@@ -61,7 +61,7 @@ export default function UserManager() {
       <PageHeader
         eyebrow="Administration"
         title="User manager"
-        subtitle="Accounts, roles and the records each person can reach. Only a super admin sees this page."
+        subtitle="Accounts, roles and the records each person can reach. Only the administrator can create, edit or delete users."
         actions={<button type="button" className="btn-gold" onClick={() => setEditing('new')}><UserPlus size={15} /> Add user</button>}
       />
 
@@ -133,9 +133,13 @@ export default function UserManager() {
                       </button>
                       <button
                         type="button"
-                        className="btn-quiet px-2 py-1 hover:text-alert"
-                        title={u.id === me.id ? 'You cannot delete your own account' : 'Delete'}
-                        disabled={u.id === me.id}
+                        className="btn-quiet px-2 py-1 hover:text-alert disabled:opacity-40 disabled:hover:text-ink-400"
+                        title={
+                          u.id === me.id ? 'You cannot delete your own account'
+                            : u.role === 'super_admin' ? 'The administrator account cannot be deleted'
+                              : 'Delete'
+                        }
+                        disabled={u.id === me.id || u.role === 'super_admin'}
                         onClick={() => setConfirmDelete(u)}
                       >
                         <Trash2 size={14} />
@@ -226,6 +230,10 @@ function UserForm({ open, user, onClose, roles, sports, teams, players, coaches,
     [key]: form[key].includes(id) ? form[key].filter((x) => x !== id) : [...form[key], id],
   });
 
+  // The administrator account keeps its role. It is what guarantees somebody
+  // can always get back in, so it cannot be demoted, suspended or deleted —
+  // but its password and details are changed like any other account's.
+  const isAdminAccount = !!user && user.role === 'super_admin';
   const role = roles.find((r) => r.key === form.role);
   const needsSports = form.role === 'sport_admin';
   const needsTeams = form.role === 'coach';
@@ -283,8 +291,11 @@ function UserForm({ open, user, onClose, roles, sports, teams, players, coaches,
             <Field label="Full name"><input className="input" required value={form.full_name} onChange={set('full_name')} /></Field>
             <Field label="Email" hint="Used to sign in"><input className="input" type="email" required value={form.email} onChange={set('email')} /></Field>
             <Field label="Phone"><input className="input" value={form.phone} onChange={set('phone')} /></Field>
-            <Field label="Status" hint="Suspended accounts keep their history but cannot sign in">
-              <select className="input" value={form.status} onChange={set('status')}>
+            <Field
+              label="Status"
+              hint={isAdminAccount ? 'The administrator account stays active' : 'Suspended accounts keep their history but cannot sign in'}
+            >
+              <select className="input disabled:opacity-60" value={form.status} disabled={isAdminAccount} onChange={set('status')}>
                 {['active', 'suspended', 'invited'].map((s) => <option key={s} value={s}>{titleCase(s)}</option>)}
               </select>
             </Field>
@@ -315,9 +326,23 @@ function UserForm({ open, user, onClose, roles, sports, teams, players, coaches,
 
         <div>
           <p className="label mb-2">Role</p>
+          {isAdminAccount && (
+            <p className="text-xs text-gold mb-2">
+              This is the administrator account. Its role and status are fixed so the club can never be
+              locked out; its password can be changed from the key icon at any time.
+            </p>
+          )}
           <div className="grid sm:grid-cols-2 gap-3">
-            <Field label="Role">
-              <select className="input" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
+            <Field
+              label="Role"
+              hint={isAdminAccount ? 'Fixed for the administrator account' : undefined}
+            >
+              <select
+                className="input disabled:opacity-60 disabled:cursor-not-allowed"
+                value={form.role}
+                disabled={isAdminAccount}
+                onChange={(e) => setForm({ ...form, role: e.target.value })}
+              >
                 {roles.map((r) => <option key={r.key} value={r.key}>{r.name}</option>)}
               </select>
             </Field>

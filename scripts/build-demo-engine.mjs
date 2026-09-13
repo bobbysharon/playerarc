@@ -17,7 +17,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const source = join(root, 'server', 'src', 'lib');
 const target = join(root, 'web', 'src', 'demo', 'engine');
 
-const MODULES = ['formula.js', 'stats-engine.js', 'permissions.js', 'match-analysis.js'];
+const MODULES = ['formula.js', 'stats-engine.js', 'permissions.js', 'match-analysis.js', 'tracking-analysis.js'];
 
 const HEADER = `/* AUTO-GENERATED — do not edit.
  * Converted from server/src/lib/%NAME% by scripts/build-demo-engine.mjs.

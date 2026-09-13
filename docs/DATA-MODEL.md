@@ -1,6 +1,6 @@
 # Data model
 
-42 tables. Every foreign key is declared and enforced (`PRAGMA foreign_keys = ON`), every table
+33 tables. Every foreign key is declared and enforced (`PRAGMA foreign_keys = ON`), every table
 carries timestamps, and no fact about an athlete is duplicated across tables.
 
 ## Core relationships
@@ -91,23 +91,6 @@ Nothing derived is stored in either table. See ARCHITECTURE.md.
 | `assessments` + `assessment_scores` | Every review kept; a new review is a new row |
 | `player_timeline` | The narrative record; `uq_timeline_system` keeps automatic writes idempotent |
 | `audit_logs` | Who changed what, when, from where, with before and after snapshots |
-
-## Cricket-only tables (Ludimos-style features)
-
-Added on top of the base schema, gated to the cricket sport at the route layer
-(`server/src/lib/cricket-scope.js`) rather than the schema layer, so widening
-them to other sports later is a permissions change, not a migration.
-
-| Table | Purpose |
-| --- | --- |
-| `sport_benchmarks` | Age-group performance targets (e.g. U16 batting average) compared against a player's real career stats |
-| `drills` | Reusable drill library, tagged by skill group (batting/bowling/fielding/fitness/wicket-keeping) |
-| `player_groups` + `player_group_members` | "Digital groups" — training groups distinct from match squads |
-| `messages` + `message_recipients` | Direct messages to a squad, digital group, or individual athlete, with read receipts |
-| `players.showcase_enabled` / `players.showcase_token` | Toggle and token for the public, read-only showcase profile link (`/api/showcase/:token`, `web/src/pages/Showcase.jsx`) — no contact details, no video |
-
-`training_sessions.group_id` links a session to a digital group as an
-alternative to `team_id`; attendance pre-fills from whichever is set.
 
 ## Integrity rules in the schema
 

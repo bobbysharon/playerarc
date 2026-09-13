@@ -99,6 +99,68 @@ curl -s -X POST localhost:4000/api/matches/13/events \
        "outcome":"six","payload":{"runs_batter":6,"shot":"pull","length":"short"},"x":30,"y":70}'
 ```
 
+## Drills, session plans, benchmarks and announcements
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| GET | `/drills` | `sport, category, difficulty, ageGroup, q` |
+| GET | `/drills/:id` | With the sessions it has been run in |
+| POST / PUT | `/drills`, `/drills/:id` | |
+| GET | `/session-templates` | Plans with their ordered drills |
+| POST | `/session-templates` | `{ name, sport_id, drills: [{ drill_id }] }` |
+| GET / PUT | `/training/:id/drills` | Drills run in one session |
+| POST | `/training/:id/apply-template/:templateId` | Build a session from a plan |
+| GET | `/benchmarks` | `sport, ageGroup, source` |
+| POST | `/benchmarks` | Four bands per metric: developing, competent, strong, exceptional |
+| GET | `/players/:id/benchmarks` | An athlete banded against their age group, career and assessment |
+| GET | `/announcements` | Filtered to what the caller is entitled to see |
+| POST | `/announcements` | `audience: club \| sport \| team \| players` |
+| DELETE | `/announcements/:id` | |
+
+`/players/:id/benchmarks` takes the age group from the squad the athlete currently plays in, falling
+back to the one implied by their date of birth. Metrics where lower is better — economy rate,
+bowling average — are banded in reverse.
+
+## Ball tracking, fitness and selection
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| GET | `/tracking/sessions` | `sport, mode, player` |
+| GET | `/tracking/sessions/:id` | Deliveries, targets, per-bowler breakdown and the session summary |
+| POST | `/tracking/sessions` | A bowling-machine session must state its speed |
+| PUT | `/tracking/sessions/:id/calibration` | Pitch and stump dimensions the measurements are relative to |
+| POST | `/tracking/sessions/:id/deliveries` | One delivery, or a whole spell as `{ deliveries: [...] }` |
+| DELETE | `/tracking/deliveries/:id` | |
+| GET / POST | `/tracking/targets` | The zone a bowler is working on, as a rectangle in centimetres |
+| GET | `/players/:id/tracking` | Speed, pitch map, stump line, consistency and the session-by-session trend |
+| GET | `/players/:id/fitness` | Records, plus a trend series per metric |
+| POST | `/fitness` | A test result, a measurement, or a logged workout |
+| GET / POST | `/assessment-templates` | Named criteria sets for trials and reviews |
+| GET | `/selection/compare` | `sport` and `players` (2–8 ids), compared on shared measures |
+
+Coordinates are in centimetres from the batter's stumps: x across the pitch, positive to the off
+side for a right-hander; y back down the pitch. Zones, the stump reading and the target score are
+all derived from the coordinate on write, so they cannot contradict the measurement they came from.
+
+```bash
+curl -s -X POST localhost:4000/api/tracking/sessions/3/deliveries \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"bowler_id":7,"release_speed_kph":139.4,"speed_off_pitch_kph":104.2,
+       "pitch_x_cm":14,"pitch_y_cm":560,"stump_x_cm":6,"stump_z_cm":40,"delivery_type":"seam"}'
+# → length_zone "good", line_zone "off_stump", hits_stumps 1, stump_hit "off"
+```
+
+## Showcase profile
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| PUT | `/players/:id/showcase` | `{ enabled, headline, regenerate }` → returns the token and path |
+| GET | `/players/showcase/:token` | **Public.** No authentication: the token is the credential |
+
+Disabling clears the token, so a previously shared link stops resolving. The public payload is built
+from a fixed set of queries — record, honours, squads, milestones — so contact details, guardians,
+documents and assessments cannot be exposed by a change made elsewhere.
+
 ## Training
 `GET /training` (`sport, team, coach, type, from, to`) · `GET /training/:id` ·
 `POST /training` (attendance pre-filled from the roster) · `PUT /training/:id` ·

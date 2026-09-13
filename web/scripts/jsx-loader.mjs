@@ -1,14 +1,16 @@
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { transformSync } from 'esbuild';
 
-// Vite resolves extensionless relative imports; Node does not.
+// Vite resolves extensionless relative imports and injects import.meta.env;
+// Node does neither, so this loader stands in for it when rendering a page
+// outside the browser.
 export async function resolve(spec, context, next) {
   if (spec.startsWith('.') && !/\.(jsx?|json|css)$/.test(spec)) {
     for (const ext of ['.js', '.jsx', '/index.js', '/index.jsx']) {
       try {
-        const candidate = await next(spec + ext, context);
-        if (candidate) return candidate;
+        const found = await next(spec + ext, context);
+        if (found) return found;
       } catch { /* try the next extension */ }
     }
   }
@@ -18,7 +20,6 @@ export async function resolve(spec, context, next) {
 export async function load(url, context, next) {
   if (url.endsWith('.jsx') || (url.includes('/src/') && url.endsWith('.js'))) {
     const raw = readFileSync(fileURLToPath(url), 'utf8')
-      // Vite injects import.meta.env; Node has no equivalent.
       .replace(/import\.meta\.env/g, '({ VITE_DEMO_MODE: "true", VITE_BASE: "/" })');
     const { code } = transformSync(raw, { loader: 'jsx', format: 'esm', jsx: 'automatic' });
     return { format: 'module', source: code, shortCircuit: true };

@@ -21,6 +21,7 @@ import {
 } from './engine/stats-engine.js';
 import { ROLES, permissionsFor, can, redactPlayer } from './engine/permissions.js';
 import { analyseMatch, derivePerformances, describeEvent } from './engine/match-analysis.js';
+import * as track from './engine/tracking-analysis.js';
 
 export const DEMO_PASSWORD = 'Karwan@2026';
 
@@ -1648,6 +1649,727 @@ route('POST', /^\/matches\/(\d+)\/analysis\/rebuild$/, (m) => {
   return { ok: true, performancesUpdated: updated };
 });
 
+
+/* ---- Drill library, session plans, benchmarks, announcements ---- */
+
+route('GET', /^\/drills$/, (_, __, query) => {
+  requireAuth();
+  const q = String(query.q || '').toLowerCase();
+  return {
+    drills: filter('drills', (d) => {
+      if (!d.is_active) return false;
+      if (query.sport && d.sport_id != null && d.sport_id !== Number(query.sport)) return false;
+      if (query.category && d.category !== query.category) return false;
+      if (query.difficulty && d.difficulty !== query.difficulty) return false;
+      if (query.ageGroup && d.age_groups && !d.age_groups.includes(query.ageGroup)) return false;
+      if (q && ![d.name, d.skill_focus, d.description].some((v) => String(v || '').toLowerCase().includes(q))) return false;
+      return true;
+    }).map((d) => ({
+      ...d,
+      sport_name: byId('sports', d.sport_id)?.name,
+      color: byId('sports', d.sport_id)?.color,
+      times_used: filter('training_session_drills', (x) => x.drill_id === d.id).length,
+    })).sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name)),
+  };
+});
+
+route('GET', /^\/drills\/(\d+)$/, (m) => {
+  requireAuth();
+  const drill = byId('drills', m[1]);
+  if (!drill) fail(404, 'That drill does not exist.');
+  return {
+    drill: { ...drill, sport_name: byId('sports', drill.sport_id)?.name },
+    sessions: filter('training_session_drills', (x) => x.drill_id === drill.id).map((x) => {
+      const s = byId('training_sessions', x.session_id) || {};
+      return { id: s.id, session_date: s.session_date, training_type: s.training_type, team_name: teamName(s.team_id), notes: x.notes };
+    }).sort((a, b) => String(b.session_date).localeCompare(String(a.session_date))).slice(0, 20),
+  };
+});
+
+route('POST', /^\/drills$/, (_, body) => {
+  requirePermission('training.write');
+  if (body.players_min && body.players_max && body.players_min > body.players_max) {
+    fail(422, 'The minimum number of players cannot exceed the maximum.');
+  }
+  const drill = {
+    id: nextId('drills'), is_active: 1, is_demo: 0, created_by: session.id,
+    created_at: now(), updated_at: now(), category: 'technical', difficulty: 'all', ...body,
+  };
+  if (!db.drills) db.drills = [];
+  db.drills.push(drill);
+  audit('create', 'drills', drill.id, `Drill added: ${drill.name}`);
+  return { drill };
+});
+
+route('PUT', /^\/drills\/(\d+)$/, (m, body) => {
+  requirePermission('training.write');
+  const drill = byId('drills', m[1]);
+  if (!drill) fail(404, 'That drill does not exist.');
+  Object.assign(drill, body, { updated_at: now() });
+  audit('update', 'drills', drill.id, `Drill updated: ${drill.name}`);
+  return { drill };
+});
+
+route('GET', /^\/session-templates$/, (_, __, query) => {
+  requireAuth();
+  return {
+    templates: filter('session_templates', (t) => !query.sport || t.sport_id == null || t.sport_id === Number(query.sport))
+      .map((t) => ({
+        ...t,
+        sport_name: byId('sports', t.sport_id)?.name,
+        drill_count: filter('session_template_drills', (d) => d.template_id === t.id).length,
+        drills: filter('session_template_drills', (d) => d.template_id === t.id)
+          .sort((a, b) => a.sort_order - b.sort_order)
+          .map((d) => {
+            const dr = byId('drills', d.drill_id) || {};
+            return { ...d, name: dr.name, category: dr.category, skill_focus: dr.skill_focus, equipment: dr.equipment, coaching_points: dr.coaching_points };
+          }),
+      })).sort((a, b) => a.name.localeCompare(b.name)),
+  };
+});
+
+route('POST', /^\/session-templates$/, (_, body) => {
+  requirePermission('training.write');
+  const template = {
+    id: nextId('session_templates'), is_demo: 0, created_by: session.id, created_at: now(),
+    name: body.name, sport_id: body.sport_id ?? null, training_type: body.training_type || 'technical',
+    age_group: body.age_group ?? null, duration_minutes: body.duration_minutes ?? null,
+    objectives: body.objectives ?? null, notes: body.notes ?? null,
+  };
+  if (!db.session_templates) db.session_templates = [];
+  db.session_templates.push(template);
+  if (!db.session_template_drills) db.session_template_drills = [];
+  (body.drills || []).forEach((d, i) => db.session_template_drills.push({
+    id: nextId('session_template_drills'), template_id: template.id, drill_id: d.drill_id,
+    sort_order: i, duration_minutes: d.duration_minutes ?? null, notes: d.notes ?? null,
+  }));
+  audit('create', 'session_templates', template.id, `Session plan created: ${template.name}`);
+  return { template };
+});
+
+route('GET', /^\/training\/(\d+)\/drills$/, (m) => {
+  requireAuth();
+  return {
+    drills: filter('training_session_drills', (x) => x.session_id === Number(m[1]))
+      .sort((a, b) => a.sort_order - b.sort_order)
+      .map((x) => {
+        const d = byId('drills', x.drill_id) || {};
+        return { ...x, name: d.name, category: d.category, skill_focus: d.skill_focus, equipment: d.equipment, coaching_points: d.coaching_points, video_url: d.video_url };
+      }),
+  };
+});
+
+route('PUT', /^\/training\/(\d+)\/drills$/, (m, body) => {
+  requirePermission('training.write');
+  const s2 = byId('training_sessions', m[1]);
+  if (!s2) fail(404, 'That training session does not exist.');
+  db.training_session_drills = (db.training_session_drills || []).filter((x) => x.session_id !== s2.id);
+  (body.drills || []).forEach((d, i) => db.training_session_drills.push({
+    id: nextId('training_session_drills'), session_id: s2.id, drill_id: d.drill_id,
+    sort_order: i, duration_minutes: d.duration_minutes ?? null, notes: d.notes ?? null,
+  }));
+  audit('update', 'training_session_drills', s2.id, `${(body.drills || []).length} drills set on session #${s2.id}`);
+  return { ok: true, count: (body.drills || []).length };
+});
+
+route('POST', /^\/training\/(\d+)\/apply-template\/(\d+)$/, (m) => {
+  requirePermission('training.write');
+  const s2 = byId('training_sessions', m[1]);
+  if (!s2) fail(404, 'That training session does not exist.');
+  const template = byId('session_templates', m[2]);
+  if (!template) fail(404, 'That session plan does not exist.');
+  const drills = filter('session_template_drills', (d) => d.template_id === template.id).sort((a, b) => a.sort_order - b.sort_order);
+  db.training_session_drills = (db.training_session_drills || []).filter((x) => x.session_id !== s2.id);
+  drills.forEach((d, i) => db.training_session_drills.push({
+    id: nextId('training_session_drills'), session_id: s2.id, drill_id: d.drill_id,
+    sort_order: i, duration_minutes: d.duration_minutes, notes: d.notes,
+  }));
+  if (template.objectives && !s2.objectives) s2.objectives = template.objectives;
+  audit('update', 'training_sessions', s2.id, `Session plan "${template.name}" applied`);
+  return { ok: true, drills: drills.length };
+});
+
+route('GET', /^\/benchmarks$/, (_, __, query) => {
+  requireAuth();
+  return {
+    benchmarks: filter('benchmarks', (b) => {
+      if (query.sport && b.sport_id != null && b.sport_id !== Number(query.sport)) return false;
+      if (query.ageGroup && b.age_group !== query.ageGroup) return false;
+      if (query.source && b.source !== query.source) return false;
+      return true;
+    }).map((b) => ({ ...b, sport_name: byId('sports', b.sport_id)?.name })),
+  };
+});
+
+route('POST', /^\/benchmarks$/, (_, body) => {
+  requirePermission('assessments.write');
+  const b = { id: nextId('benchmarks'), is_demo: 0, created_at: now(), source: 'career', higher_is_better: 1, ...body };
+  if (!db.benchmarks) db.benchmarks = [];
+  db.benchmarks.push(b);
+  audit('create', 'benchmarks', b.id, `Benchmark added: ${b.label} (${b.age_group})`);
+  return { benchmark: b };
+});
+
+/** Which band a value falls into — mirrors the server. */
+function benchmarkBand(b, value) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) return null;
+  const v = Number(value);
+  for (const name of ['exceptional', 'strong', 'competent', 'developing']) {
+    const threshold = b[name];
+    if (threshold === null || threshold === undefined) continue;
+    if (b.higher_is_better ? v >= threshold : v <= threshold) return name;
+  }
+  return 'below';
+}
+
+route('GET', /^\/players\/(\d+)\/benchmarks$/, (m) => {
+  requireAuth();
+  const playerId = Number(m[1]);
+  guardPlayer(playerId);
+  const player = playerOf(playerId);
+  if (!player) fail(404, 'That athlete record does not exist.');
+
+  const membership = filter('team_memberships', (tm) => tm.player_id === playerId && !tm.end_date)
+    .map((tm) => byId('teams', tm.team_id))
+    .find((t) => t && t.age_group);
+  let ageGroup = membership?.age_group;
+  if (!ageGroup && player.dob) {
+    const age = Math.floor((Date.now() - new Date(player.dob)) / (365.25 * 864e5));
+    ageGroup = age < 16 ? 'U16' : age < 18 ? 'U18' : 'Senior';
+  }
+  ageGroup = ageGroup || 'Senior';
+
+  const career = [];
+  for (const ps of filter('player_sports', (x) => x.player_id === playerId).sort((a, b) => b.is_primary - a.is_primary)) {
+    const sport = sportOf(ps.sport_id);
+    if (!sport) continue;
+    const values = playerCareer(playerId, sport).career.values;
+    for (const b of filter('benchmarks', (x) => x.age_group === ageGroup && x.source === 'career'
+      && (x.sport_id === sport.id || x.sport_id == null)
+      && (x.gender == null || x.gender === (player.gender || 'male')))) {
+      if (values[b.metric] === undefined) continue;
+      career.push({
+        sport: sport.name, sportId: sport.id, metric: b.metric, label: b.label, unit: b.unit,
+        value: Math.round(Number(values[b.metric]) * 100) / 100,
+        band: benchmarkBand(b, values[b.metric]),
+        thresholds: { developing: b.developing, competent: b.competent, strong: b.strong, exceptional: b.exceptional },
+        higherIsBetter: !!b.higher_is_better,
+      });
+    }
+  }
+
+  const latest = filter('assessments', (a) => a.player_id === playerId)
+    .sort((a, b) => String(b.assessment_date).localeCompare(String(a.assessment_date)))[0];
+  const assessment = [];
+  if (latest) {
+    for (const sc of filter('assessment_scores', (x) => x.assessment_id === latest.id)) {
+      const c = byId('assessment_criteria', sc.criteria_id);
+      if (!c) continue;
+      const b = find('benchmarks', (x) => x.age_group === ageGroup && x.source === 'assessment' && x.metric === c.key
+        && (x.sport_id === latest.sport_id || x.sport_id == null));
+      if (!b) continue;
+      assessment.push({
+        metric: c.key, label: c.name, category: c.category, value: sc.score,
+        band: benchmarkBand(b, sc.score),
+        thresholds: { developing: b.developing, competent: b.competent, strong: b.strong, exceptional: b.exceptional },
+        higherIsBetter: !!b.higher_is_better,
+      });
+    }
+  }
+
+  return { ageGroup, assessedOn: latest?.assessment_date ?? null, career, assessment };
+});
+
+route('GET', /^\/announcements$/, () => {
+  const user = requireAuth();
+  const teams = allowedTeamIds(user);
+  const linked = user.linkedPlayerIds || [];
+  const today10 = today();
+
+  return {
+    announcements: filter('announcements', (a) => {
+      if (a.expires_at && a.expires_at < today10) return false;
+      if (a.audience === 'club' || a.audience === 'sport') return true;
+      if (a.audience === 'team') return teams === null || teams.includes(a.team_id);
+      const addressed = filter('announcement_recipients', (r) => r.announcement_id === a.id
+        && (r.user_id === user.id || linked.includes(r.player_id)));
+      return addressed.length > 0 || ['super_admin', 'sports_director'].includes(user.role);
+    }).map((a) => ({
+      ...a,
+      sport_name: byId('sports', a.sport_id)?.name,
+      team_name: teamName(a.team_id),
+      author: byId('users', a.created_by)?.full_name,
+      recipients: filter('announcement_recipients', (r) => r.announcement_id === a.id).map((r) => {
+        const p = playerOf(r.player_id) || {};
+        return { ...r, first_name: p.first_name, last_name: p.last_name, athlete_id: p.athlete_id };
+      }),
+    })).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at))),
+  };
+});
+
+route('POST', /^\/announcements$/, (_, body) => {
+  requirePermission('training.write');
+  if (body.audience === 'team' && !body.team_id) fail(422, 'Choose the team this is for.');
+  if (body.audience === 'sport' && !body.sport_id) fail(422, 'Choose the sport this is for.');
+  if (body.audience === 'players' && !(body.playerIds || []).length) {
+    fail(422, 'Choose at least one athlete to send this to.');
+  }
+  const a = {
+    id: nextId('announcements'), priority: 'normal', audience: 'club', is_demo: 0,
+    created_by: session.id, created_at: now(),
+    title: body.title, body: body.body, sport_id: body.sport_id ?? null, team_id: body.team_id ?? null,
+    starts_at: body.starts_at ?? null, expires_at: body.expires_at ?? null,
+    ...(body.priority ? { priority: body.priority } : {}),
+    ...(body.audience ? { audience: body.audience } : {}),
+  };
+  if (!db.announcements) db.announcements = [];
+  db.announcements.push(a);
+  if (!db.announcement_recipients) db.announcement_recipients = [];
+  (body.playerIds || []).forEach((player_id) => db.announcement_recipients.push({
+    id: nextId('announcement_recipients'), announcement_id: a.id, player_id, user_id: null, read_at: null,
+  }));
+  audit('create', 'announcements', a.id, `Announcement sent: ${a.title}`);
+  return { announcement: a };
+});
+
+route('DELETE', /^\/announcements\/(\d+)$/, (m) => {
+  requirePermission('training.write');
+  const a = byId('announcements', m[1]);
+  if (!a) fail(404, 'That announcement does not exist.');
+  db.announcements = db.announcements.filter((x) => x.id !== a.id);
+  audit('delete', 'announcements', a.id, `Announcement removed: ${a.title}`);
+  return { ok: true };
+});
+
+/* ---- Showcase profile ---- */
+
+route('PUT', /^\/players\/(\d+)\/showcase$/, (m, body) => {
+  requirePermission('players.write');
+  const player = playerOf(m[1]);
+  if (!player) fail(404, 'That athlete record does not exist.');
+  guardPlayer(player.id);
+
+  let token = player.showcase_token;
+  if (!body.enabled) token = null;
+  else if (!token || body.regenerate) token = `sc-${Math.random().toString(36).slice(2, 14)}`;
+
+  player.showcase_enabled = body.enabled ? 1 : 0;
+  player.showcase_token = token;
+  if (body.headline !== undefined) player.showcase_headline = body.headline;
+  player.showcase_updated_at = now();
+
+  audit('update', 'players', player.id, `Showcase ${body.enabled ? 'enabled' : 'disabled'} for ${player.athlete_id}`);
+  return { enabled: !!body.enabled, token, path: token ? `/showcase/${token}` : null };
+});
+
+route('GET', /^\/players\/showcase\/([^/]+)$/, (m) => {
+  const player = find('players', (p) => p.showcase_token === m[1] && p.showcase_enabled);
+  if (!player) fail(404, 'That showcase profile is not available. The link may have been withdrawn.');
+
+  return {
+    athlete: {
+      athleteId: player.athlete_id,
+      name: player.display_name || `${player.first_name} ${player.last_name}`,
+      headline: player.showcase_headline,
+      photoUrl: player.photo_url,
+      nationality: player.nationality,
+      dob: player.dob,
+      preferredHand: player.preferred_hand,
+      preferredFoot: player.preferred_foot,
+      heightCm: player.height_cm,
+      registeredSince: player.registration_date,
+      club: 'Karwan Sports Club',
+      updatedAt: player.showcase_updated_at,
+    },
+    summary: summaryFor(player.id),
+    careers: careersFor(player.id).map((c) => ({
+      sport: c.sport, matchesPlayed: c.matchesPlayed, headline: c.headline,
+      rating: c.rating ? { overall: c.rating.overall, components: c.rating.components } : null,
+      career: { groups: c.career.groups },
+    })),
+    teams: filter('team_memberships', (tm) => tm.player_id === player.id).map((tm) => {
+      const t = byId('teams', tm.team_id) || {};
+      return {
+        name: t.name, age_group: t.age_group, level: t.level,
+        sport_name: byId('sports', t.sport_id)?.name,
+        start_date: tm.start_date, end_date: tm.end_date, role: tm.role,
+      };
+    }).sort((a, b) => (!!a.end_date - !!b.end_date) || String(b.start_date).localeCompare(String(a.start_date))),
+    achievements: filter('achievements', (a) => a.player_id === player.id).map((a) => ({
+      title: a.title, category: a.category, level: a.level, awarded_date: a.awarded_date,
+      description: a.description, sport_name: byId('sports', a.sport_id)?.name,
+      tournament_name: tournamentName(a.tournament_id),
+    })).sort((a, b) => String(b.awarded_date).localeCompare(String(a.awarded_date))),
+    milestones: filter('player_timeline', (t) => t.player_id === player.id && t.importance === 3)
+      .map((t) => ({ event_date: t.event_date, event_type: t.event_type, title: t.title, description: t.description }))
+      .sort((a, b) => String(b.event_date).localeCompare(String(a.event_date))).slice(0, 30),
+  };
+});
+
+
+/* ---- Ball tracking, fitness, templates, selection ---- */
+
+const deliveryRow = (d) => {
+  const b = playerOf(d.bowler_id) || {};
+  const bt = playerOf(d.batter_id) || {};
+  const s2 = byId('tracking_sessions', d.session_id) || {};
+  return {
+    ...d,
+    bowler_first: b.first_name, bowler_last: b.last_name,
+    batter_first: bt.first_name, batter_last: bt.last_name,
+    session_date: s2.session_date, mode: s2.mode, session_title: s2.title,
+    trajectory: parseJson(d.trajectory_json, null), trajectory_json: undefined,
+  };
+};
+
+route('GET', /^\/tracking\/sessions$/, (_, __, query) => {
+  requireAuth();
+  return {
+    sessions: filter('tracking_sessions', (s2) => {
+      if (query.sport && s2.sport_id !== Number(query.sport)) return false;
+      if (query.mode && s2.mode !== query.mode) return false;
+      if (query.player) {
+        const id = Number(query.player);
+        return filter('deliveries', (d) => d.session_id === s2.id && (d.bowler_id === id || d.batter_id === id)).length > 0;
+      }
+      return true;
+    }).map((s2) => ({
+      ...s2,
+      sport_name: byId('sports', s2.sport_id)?.name,
+      color: byId('sports', s2.sport_id)?.color,
+      team_name: teamName(s2.team_id),
+      coach_name: byId('coaches', s2.coach_id)?.full_name,
+      delivery_count: filter('deliveries', (d) => d.session_id === s2.id).length,
+    })).sort((a, b) => String(b.session_date).localeCompare(String(a.session_date)) || b.id - a.id),
+  };
+});
+
+route('GET', /^\/tracking\/sessions\/(\d+)$/, (m) => {
+  requireAuth();
+  const session = byId('tracking_sessions', m[1]);
+  if (!session) fail(404, 'That tracking session does not exist.');
+  const deliveries = filter('deliveries', (d) => d.session_id === session.id)
+    .sort((a, b) => a.sequence - b.sequence).map(deliveryRow);
+
+  const bowlers = [...new Set(deliveries.map((d) => d.bowler_id).filter(Boolean))].map((id) => {
+    const subset = deliveries.filter((d) => d.bowler_id === id);
+    const p = playerOf(id);
+    return {
+      player: p ? { id: p.id, first_name: p.first_name, last_name: p.last_name, display_name: p.display_name, photo_url: p.photo_url } : null,
+      deliveries: subset.length,
+      speed: track.speedSummary(subset),
+      consistency: track.consistency(subset),
+      stumpLine: track.stumpLine(subset),
+    };
+  }).sort((a, b) => b.deliveries - a.deliveries);
+
+  return {
+    session: { ...session, sport_name: byId('sports', session.sport_id)?.name, sport_code: byId('sports', session.sport_id)?.code, team_name: teamName(session.team_id), coach_name: byId('coaches', session.coach_id)?.full_name },
+    deliveries,
+    targets: filter('consistency_targets', (t) => t.session_id === session.id),
+    bowlers,
+    summary: {
+      deliveries: deliveries.length,
+      speed: track.speedSummary(deliveries),
+      pitchMap: track.pitchMap(deliveries),
+      stumpLine: track.stumpLine(deliveries),
+      consistency: track.consistency(deliveries),
+    },
+  };
+});
+
+route('POST', /^\/tracking\/sessions$/, (_, body) => {
+  requirePermission('performances.write');
+  if (body.mode === 'bowling_machine' && !body.machine_speed_kph) {
+    fail(422, 'Set the machine speed, so the deliveries can be read against what it was set to.');
+  }
+  // Named `row` here: `session` is the signed-in user in this module.
+  const row = {
+    id: nextId('tracking_sessions'), mode: 'nets', calibrated: 0, source: 'manual',
+    pitch_length_cm: 2012, pitch_width_cm: 305, stump_width_cm: 22.86, stump_height_cm: 71.1,
+    crease_to_stump_cm: 122, is_demo: 0, created_by: session.id, created_at: now(), updated_at: now(),
+    ...body,
+  };
+  if (!db.tracking_sessions) db.tracking_sessions = [];
+  db.tracking_sessions.push(row);
+  audit('create', 'tracking_sessions', row.id, `Tracking session opened: ${row.title}`);
+  return { session: row };
+});
+
+route('PUT', /^\/tracking\/sessions\/(\d+)\/calibration$/, (m, body) => {
+  requirePermission('performances.write');
+  const s2 = byId('tracking_sessions', m[1]);
+  if (!s2) fail(404, 'That tracking session does not exist.');
+  s2.calibrated = 1;
+  s2.calibration_method = body.method;
+  for (const k of ['pitch_length_cm', 'pitch_width_cm', 'stump_width_cm', 'stump_height_cm', 'crease_to_stump_cm']) {
+    if (body[k] !== undefined && body[k] !== null) s2[k] = body[k];
+  }
+  s2.calibration_note = body.note ?? null;
+  s2.updated_at = now();
+  audit('update', 'tracking_sessions', s2.id, `Scene calibrated (${body.method})`);
+  return { session: s2 };
+});
+
+route('POST', /^\/tracking\/sessions\/(\d+)\/deliveries$/, (m, body) => {
+  requirePermission('performances.write');
+  const s2 = byId('tracking_sessions', m[1]);
+  if (!s2) fail(404, 'That tracking session does not exist.');
+
+  const payloads = Array.isArray(body.deliveries) ? body.deliveries : [body];
+  let next = filter('deliveries', (d) => d.session_id === s2.id).reduce((mx, d) => Math.max(mx, d.sequence), 0) + 1;
+  if (!db.deliveries) db.deliveries = [];
+  const created = [];
+
+  for (const p of payloads) {
+    const hand = p.batter_handedness
+      || (p.batter_id ? (playerOf(p.batter_id)?.preferred_hand === 'left' ? 'left' : 'right') : 'right');
+    const target = p.target_id
+      ? byId('consistency_targets', p.target_id)
+      : find('consistency_targets', (t) => t.session_id === s2.id && t.player_id === (p.bowler_id ?? null) && t.active);
+
+    const reading = track.stumpReading(p.stump_x_cm ?? null, p.stump_z_cm ?? null, hand);
+    const aim = track.targetReading({ ...p, batter_handedness: hand }, target);
+    const drop = Number.isFinite(p.release_speed_kph) && Number.isFinite(p.speed_off_pitch_kph) && p.release_speed_kph > 0
+      ? Math.round(((p.release_speed_kph - p.speed_off_pitch_kph) / p.release_speed_kph) * 1000) / 10
+      : null;
+
+    const row = {
+      id: nextId('deliveries'), session_id: s2.id, event_id: p.event_id ?? null, sequence: next,
+      over_number: p.over_number ?? null, ball_in_over: p.ball_in_over ?? null,
+      bowler_id: p.bowler_id ?? null, batter_id: p.batter_id ?? null, batter_handedness: hand,
+      release_speed_kph: p.release_speed_kph ?? null, speed_off_pitch_kph: p.speed_off_pitch_kph ?? null,
+      speed_drop_percent: drop,
+      pitch_x_cm: p.pitch_x_cm ?? null, pitch_y_cm: p.pitch_y_cm ?? null,
+      bounce_height_cm: p.bounce_height_cm ?? null,
+      length_zone: track.lengthZoneFor(p.pitch_y_cm ?? null),
+      line_zone: track.lineZoneFor(p.pitch_x_cm ?? null, hand),
+      stump_x_cm: p.stump_x_cm ?? null, stump_z_cm: p.stump_z_cm ?? null,
+      hits_stumps: reading.hits, stump_hit: reading.stump,
+      deviation_deg: p.deviation_deg ?? null, swing_deg: p.swing_deg ?? null, spin_rpm: p.spin_rpm ?? null,
+      release_height_cm: p.release_height_cm ?? null, delivery_type: p.delivery_type ?? null,
+      target_line: target?.line_zone ?? null, target_length: target?.length_zone ?? null,
+      in_target: aim.inTarget, distance_from_target_cm: aim.distanceCm,
+      outcome: p.outcome ?? null, runs: p.runs ?? null, wicket: p.wicket ?? 0,
+      machine_delivery: p.machine_delivery ?? (s2.mode === 'bowling_machine' ? 1 : 0),
+      trajectory_json: p.trajectory ? JSON.stringify(p.trajectory) : null,
+      source: p.source ?? s2.source ?? 'manual', notes: p.notes ?? null, created_at: now(),
+    };
+    db.deliveries.push(row);
+    created.push(deliveryRow(row));
+    next += 1;
+  }
+
+  audit('create', 'deliveries', s2.id, `${created.length} deliveries tracked in "${s2.title}"`);
+  return { deliveries: created, count: created.length };
+});
+
+route('DELETE', /^\/tracking\/deliveries\/(\d+)$/, (m) => {
+  requirePermission('performances.write');
+  const row = byId('deliveries', m[1]);
+  if (!row) fail(404, 'That delivery does not exist.');
+  db.deliveries = db.deliveries.filter((d) => d.id !== row.id);
+  audit('delete', 'deliveries', row.id, 'Tracked delivery removed');
+  return { ok: true };
+});
+
+route('GET', /^\/tracking\/targets$/, (_, __, query) => {
+  requireAuth();
+  return {
+    targets: filter('consistency_targets', (t) => {
+      if (query.player && t.player_id !== Number(query.player)) return false;
+      if (query.session && t.session_id !== Number(query.session)) return false;
+      return true;
+    }).map((t) => {
+      const p = playerOf(t.player_id) || {};
+      return { ...t, first_name: p.first_name, last_name: p.last_name };
+    }),
+  };
+});
+
+route('POST', /^\/tracking\/targets$/, (_, body) => {
+  requirePermission('performances.write');
+  const target = { id: nextId('consistency_targets'), tolerance_cm: 30, active: 1, is_demo: 0, created_by: session.id, created_at: now(), ...body };
+  if (!db.consistency_targets) db.consistency_targets = [];
+  db.consistency_targets.push(target);
+  audit('create', 'consistency_targets', target.id, `Target set: ${target.name}`);
+  return { target };
+});
+
+route('GET', /^\/players\/(\d+)\/tracking$/, (m) => {
+  requireAuth();
+  const id = Number(m[1]);
+  guardPlayer(id);
+  const bowled = filter('deliveries', (d) => d.bowler_id === id).map(deliveryRow);
+  const faced = filter('deliveries', (d) => d.batter_id === id).map(deliveryRow);
+  const sessionIds = [...new Set(bowled.map((d) => d.session_id))];
+  const sessions = sessionIds.map((sid) => ({
+    ...byId('tracking_sessions', sid),
+    deliveries: bowled.filter((d) => d.session_id === sid),
+  }));
+  return {
+    playerId: id,
+    bowling: bowled.length ? track.bowlerReport(bowled, sessions) : null,
+    batting: faced.length ? track.batterReport(faced) : null,
+    sessions: sessions.length,
+    calibratedSessions: sessions.filter((s2) => s2.calibrated).length,
+  };
+});
+
+route('GET', /^\/players\/(\d+)\/fitness$/, (m) => {
+  requireAuth();
+  const id = Number(m[1]);
+  guardPlayer(id);
+  const records = filter('fitness_records', (f) => f.player_id === id)
+    .map((f) => ({ ...f, coach_name: byId('coaches', f.coach_id)?.full_name }))
+    .sort((a, b) => String(b.record_date).localeCompare(String(a.record_date)) || b.id - a.id);
+
+  const metrics = {};
+  for (const r of records) {
+    if (r.kind === 'workout') continue;
+    if (!metrics[r.metric]) {
+      metrics[r.metric] = { metric: r.metric, label: r.label, unit: r.unit, category: r.category, higherIsBetter: !!r.higher_is_better, points: [] };
+    }
+    metrics[r.metric].points.push({ date: r.record_date, value: r.value });
+  }
+  const series = Object.values(metrics).map((mm) => {
+    const points = mm.points.slice().sort((a, b) => String(a.date).localeCompare(String(b.date)));
+    const first = points[0]?.value;
+    const last = points.at(-1)?.value;
+    const change = first !== undefined && last !== undefined ? last - first : null;
+    return {
+      ...mm, points, latest: last ?? null,
+      best: points.length ? (mm.higherIsBetter ? Math.max(...points.map((p) => p.value)) : Math.min(...points.map((p) => p.value))) : null,
+      change: change === null ? null : Math.round(change * 100) / 100,
+      improved: change === null ? null : (mm.higherIsBetter ? change > 0 : change < 0),
+    };
+  });
+  const workouts = records.filter((r) => r.kind === 'workout');
+  const rpes = workouts.filter((w) => w.rpe);
+  return {
+    records, series, workouts,
+    summary: {
+      tests: records.filter((r) => r.kind === 'test').length,
+      workouts: workouts.length,
+      metricsTracked: series.length,
+      improving: series.filter((s2) => s2.improved === true).length,
+      lastRecorded: records[0]?.record_date ?? null,
+      averageRpe: rpes.length ? Math.round((rpes.reduce((a, w) => a + w.rpe, 0) / rpes.length) * 10) / 10 : null,
+    },
+  };
+});
+
+route('POST', /^\/fitness$/, (_, body) => {
+  requirePermission('training.write');
+  guardPlayer(body.player_id);
+  const record = { id: nextId('fitness_records'), kind: 'test', category: 'conditioning', higher_is_better: 1, is_demo: 0, created_by: session.id, created_at: now(), ...body };
+  if (!db.fitness_records) db.fitness_records = [];
+  db.fitness_records.push(record);
+  audit('create', 'fitness_records', record.id, `Fitness recorded: ${record.label}`);
+  return { record };
+});
+
+route('GET', /^\/assessment-templates$/, (_, __, query) => {
+  requireAuth();
+  return {
+    templates: filter('assessment_templates', (t) => t.is_active
+      && (!query.sport || t.sport_id === Number(query.sport) || t.sport_id == null))
+      .map((t) => ({
+        ...t,
+        sport_name: byId('sports', t.sport_id)?.name,
+        criteria: filter('assessment_template_criteria', (tc) => tc.template_id === t.id)
+          .sort((a, b) => a.sort_order - b.sort_order)
+          .map((tc) => {
+            const c = byId('assessment_criteria', tc.criteria_id) || {};
+            return { ...tc, key: c.key, name: c.name, category: c.category, scale_min: c.scale_min, scale_max: c.scale_max, description: c.description };
+          }),
+      })).sort((a, b) => a.purpose.localeCompare(b.purpose) || a.name.localeCompare(b.name)),
+  };
+});
+
+route('POST', /^\/assessment-templates$/, (_, body) => {
+  requirePermission('assessments.write');
+  if (!(body.criteria || []).length) fail(422, 'Choose at least one criterion.');
+  const t = {
+    id: nextId('assessment_templates'), purpose: 'review', is_active: 1, is_demo: 0,
+    created_by: session.id, created_at: now(),
+    name: body.name, sport_id: body.sport_id ?? null, age_group: body.age_group ?? null,
+    description: body.description ?? null,
+    ...(body.purpose ? { purpose: body.purpose } : {}),
+  };
+  if (!db.assessment_templates) db.assessment_templates = [];
+  db.assessment_templates.push(t);
+  if (!db.assessment_template_criteria) db.assessment_template_criteria = [];
+  body.criteria.forEach((c, i) => db.assessment_template_criteria.push({
+    id: nextId('assessment_template_criteria'), template_id: t.id, criteria_id: c.criteria_id,
+    sort_order: i, weight: c.weight ?? 1,
+  }));
+  audit('create', 'assessment_templates', t.id, `Assessment template created: ${t.name}`);
+  return { template: t };
+});
+
+route('GET', /^\/selection\/compare$/, (_, __, query) => {
+  requireAuth();
+  const ids = String(query.players || '').split(',').map(Number).filter(Boolean);
+  if (ids.length < 2) fail(422, 'Choose at least two athletes to compare.');
+  if (ids.length > 8) fail(422, 'Compare up to eight athletes at a time.');
+  const sport = sportOf(Number(query.sport));
+  if (!sport) fail(422, 'Choose the sport to compare them in.');
+
+  const rows = [];
+  for (const id of ids) {
+    const p = playerOf(id);
+    if (!p) continue;
+    const career = playerCareer(id, sport);
+    const membership = filter('team_memberships', (tm) => tm.player_id === id && !tm.end_date)
+      .map((tm) => byId('teams', tm.team_id)).find((t) => t && t.sport_id === sport.id);
+    const latest = filter('assessments', (a) => a.player_id === id && a.sport_id === sport.id)
+      .sort((a, b) => String(b.assessment_date).localeCompare(String(a.assessment_date)))[0];
+    const att = filter('training_attendance', (ta) => {
+      const ts = byId('training_sessions', ta.session_id);
+      return ta.player_id === id && ts && ts.sport_id === sport.id;
+    });
+    const tracked = filter('deliveries', (d) => d.bowler_id === id);
+    const inZone = tracked.filter((d) => d.in_target === 1).length;
+
+    rows.push({
+      player: { id: p.id, athlete_id: p.athlete_id, first_name: p.first_name, last_name: p.last_name, display_name: p.display_name, photo_url: p.photo_url, dob: p.dob, status: p.status },
+      team: membership?.name ?? null,
+      ageGroup: membership?.age_group ?? null,
+      matches: career.matchesPlayed,
+      headline: career.headline,
+      rating: career.rating?.overall ?? null,
+      assessment: latest ? { score: latest.overall_score, date: latest.assessment_date } : null,
+      attendance: att.length
+        ? Math.round((att.filter((a) => ['present', 'late'].includes(a.status)).length / att.length) * 100)
+        : null,
+      tracking: tracked.length
+        ? {
+          balls: tracked.length,
+          averageSpeed: Math.round((tracked.reduce((a, d) => a + (d.release_speed_kph || 0), 0) / tracked.filter((d) => d.release_speed_kph).length) * 10) / 10 || null,
+          inZonePercent: Math.round((inZone / tracked.length) * 1000) / 10,
+        }
+        : null,
+      fitness: filter('fitness_records', (f) => f.player_id === id && f.kind === 'test')
+        .sort((a, b) => String(b.record_date).localeCompare(String(a.record_date)))
+        .slice(0, 4).map((f) => ({ metric: f.metric, label: f.label, value: f.value, unit: f.unit })),
+      achievements: filter('achievements', (a) => a.player_id === id).length,
+    });
+  }
+  if (rows.length < 2) fail(403, 'Fewer than two of those athletes are within the teams assigned to you.');
+
+  const common = (rows[0].headline || [])
+    .filter((h) => rows.every((r) => (r.headline || []).some((x) => x.key === h.key)))
+    .map((h) => ({ key: h.key, label: h.label }));
+
+  return {
+    sport: { id: sport.id, code: sport.code, name: sport.name },
+    columns: common,
+    rows,
+    note: "Every figure here is taken from the athlete's own record. Nothing is weighted or ranked — that judgement stays with the selectors.",
+  };
+});
+
 /* ---- Training ---- */
 route('GET', /^\/training$/, (_, __, query) => {
   requireAuth();
@@ -2218,6 +2940,18 @@ route('PUT', /^\/admin\/users\/(\d+)$/, (m, body) => {
   requirePermission('*');
   const user = byId('users', m[1]);
   if (!user) fail(404, 'That user does not exist.');
+
+  // The administrator account keeps its role and stays active, so the club can
+  // never lock itself out. Its password and details change as normal.
+  const currentRole = byId('roles', user.role_id)?.key;
+  if (currentRole === 'super_admin' && body.role && body.role !== 'super_admin') {
+    fail(409, 'The administrator role cannot be changed. Promote another account to administrator first, then change this one.');
+  }
+  if (currentRole === 'super_admin' && body.status && body.status !== 'active') {
+    const others = filter('users', (u) => u.id !== user.id && u.status === 'active'
+      && byId('roles', u.role_id)?.key === 'super_admin').length;
+    if (others === 0) fail(409, 'This is the last active administrator, so it cannot be suspended.');
+  }
   if (body.role) {
     const role = find('roles', (r) => r.key === body.role);
     if (!role) fail(422, 'That role does not exist.');

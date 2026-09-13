@@ -43,10 +43,6 @@ const PERMISSIONS = {
     'documents.read', 'documents.write',
     'reports.read', 'reports.export',
     'rankings.read', 'analytics.read',
-    'benchmarks.read', 'benchmarks.write',
-    'drills.read', 'drills.write',
-    'groups.read', 'groups.write',
-    'messages.read', 'messages.write',
     'audit.read',
   ],
   sport_admin: [
@@ -65,10 +61,6 @@ const PERMISSIONS = {
     'documents.read',
     'reports.read', 'reports.export',
     'rankings.read', 'analytics.read',
-    'benchmarks.read', 'benchmarks.write',
-    'drills.read', 'drills.write',
-    'groups.read', 'groups.write',
-    'messages.read', 'messages.write',
   ],
   coach: [
     'players.read',
@@ -80,10 +72,6 @@ const PERMISSIONS = {
     'media.read', 'media.write',
     'reports.read',
     'rankings.read', 'analytics.read',
-    'benchmarks.read',
-    'drills.read', 'drills.write',
-    'groups.read', 'groups.write',
-    'messages.read', 'messages.write',
   ],
   statistician: [
     'players.read',
@@ -97,10 +85,9 @@ const PERMISSIONS = {
     'media.read',
     'reports.read', 'reports.export',
     'rankings.read', 'analytics.read',
-    'benchmarks.read',
   ],
-  player: ['self.read', 'sports.read', 'rankings.read', 'messages.read'],
-  guardian: ['self.read', 'sports.read', 'messages.read'],
+  player: ['self.read', 'sports.read', 'rankings.read'],
+  guardian: ['self.read', 'sports.read'],
   public: ['public.read'],
 };
 
@@ -108,22 +95,10 @@ function permissionsFor(roleKey) {
   return PERMISSIONS[roleKey] || [];
 }
 
-/**
- * The Super Admin account is for platform administration — users, roles,
- * settings, audit — not day-to-day athlete record-keeping. It deliberately
- * cannot log training sessions, assessments or achievements/awards (it can
- * still read/view them); that work belongs to coaches and sport admins.
- */
-const SUPER_ADMIN_DENIED = ['training.write', 'assessments.write', 'achievements.write'];
-
 function can(user, permission) {
   if (!user) return false;
   const list = permissionsFor(user.role);
-  if (list.includes('*')) {
-    if (user.role === 'super_admin' && SUPER_ADMIN_DENIED.includes(permission)) return false;
-    return true;
-  }
-  return list.includes(permission);
+  return list.includes('*') || list.includes(permission);
 }
 
 /** Roles that see every player record regardless of sport or team. */

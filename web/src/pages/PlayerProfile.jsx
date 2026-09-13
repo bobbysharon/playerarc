@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { api, DEMO_MODE } from '../lib/api';
+import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import {
   Spinner, ErrorNote, Avatar, StatusChip, Section, Tabs, StatTile, Modal, Field,
@@ -16,6 +16,8 @@ export default function PlayerProfile() {
   const [timeline, setTimeline] = useState(null);
   const [activity, setActivity] = useState(null);
   const [development, setDevelopment] = useState(null);
+  const [benchmarks, setBenchmarks] = useState(null);
+  const [showcase, setShowcase] = useState(false);
   const [error, setError] = useState(null);
   const [tab, setTab] = useState('overview');
   const [editing, setEditing] = useState(false);
@@ -34,6 +36,7 @@ export default function PlayerProfile() {
     api.get(`/players/${id}/timeline`).then((d) => setTimeline(d.events)).catch(() => setTimeline([]));
     api.get(`/players/${id}/activity?limit=6`).then(setActivity).catch(() => setActivity(null));
     api.get(`/assessments/player/${id}/development`).then(setDevelopment).catch(() => setDevelopment(null));
+    api.get(`/players/${id}/benchmarks`).then(setBenchmarks).catch(() => setBenchmarks(null));
   }, [id]);
 
   useEffect(() => { load(); }, [load]);
@@ -90,6 +93,7 @@ export default function PlayerProfile() {
                 Career report
               </button>
             )}
+            {can('players.write') && <button type="button" className="btn-ghost" onClick={() => setShowcase(true)}>Showcase</button>}
             {can('players.write') && <button type="button" className="btn-gold" onClick={() => setEditing(true)}>Edit record</button>}
           </div>
         </div>
@@ -200,10 +204,6 @@ export default function PlayerProfile() {
                     </ul>
                   )}
               </Section>
-
-              {careers?.some((c) => c.sport.code === 'cricket') && !DEMO_MODE && (
-                <CricketShowcaseCard playerId={id} player={p} canWrite={can('players.write')} onChanged={load} />
-              )}
             </div>
           </div>
         )}
@@ -267,6 +267,43 @@ export default function PlayerProfile() {
                   />
                 ) : <EmptyState title="No assessments recorded" message="Coaches can record a structured assessment from the Assessments page." />}
               </div>
+            </Section>
+
+            <Section
+              title="Against the age group"
+              subtitle={benchmarks ? `Measured against ${benchmarks.ageGroup} standards` : 'Loading'}
+              className="lg:col-span-3"
+            >
+              {!benchmarks || (!benchmarks.career.length && !benchmarks.assessment.length) ? (
+                <EmptyState
+                  title="No benchmarks apply yet"
+                  message="Benchmarks compare an athlete against the standard for their age group. Add them under Assessments, or record more matches so there is something to measure."
+                />
+              ) : (
+                <div className="p-4 space-y-5">
+                  {benchmarks.career.length > 0 && (
+                    <div>
+                      <p className="label mb-2">Match record</p>
+                      <div className="space-y-2.5">
+                        {benchmarks.career.map((c) => <BenchmarkRow key={`${c.sportId}-${c.metric}`} item={c} />)}
+                      </div>
+                    </div>
+                  )}
+                  {benchmarks.assessment.length > 0 && (
+                    <div>
+                      <p className="label mb-2">Assessment{benchmarks.assessedOn ? ` — ${formatDate(benchmarks.assessedOn)}` : ''}</p>
+                      <div className="space-y-2.5">
+                        {benchmarks.assessment.map((c) => <BenchmarkRow key={c.metric} item={c} />)}
+                      </div>
+                    </div>
+                  )}
+                  <p className="text-xs text-ink-400">
+                    A number on its own says little — twenty-four runs an innings is excellent at under-14 and
+                    modest for a senior. These read each figure against the standard for the group this athlete
+                    actually plays in.
+                  </p>
+                </div>
+              )}
             </Section>
 
             <Section title="Current profile" subtitle="Latest score per category">
@@ -554,6 +591,7 @@ export default function PlayerProfile() {
         current={currentTeams}
         onSaved={load}
       />
+      <ShowcaseControl open={showcase} onClose={() => setShowcase(false)} player={p} onSaved={load} />
       <AssignStaff
         open={assigningStaff}
         onClose={() => setAssigningStaff(false)}
@@ -913,86 +951,144 @@ function AssignStaff({ open, onClose, playerId, coaches, sports, onSaved }) {
   );
 }
 
+/** One metric against its age-group bands. */
+function BenchmarkRow({ item }) {
+  const BANDS = [
+    { key: 'below', label: 'Below', colour: 'bg-alert', text: 'text-alert' },
+    { key: 'developing', label: 'Developing', colour: 'bg-gold', text: 'text-gold' },
+    { key: 'competent', label: 'Competent', colour: 'bg-sky', text: 'text-sky' },
+    { key: 'strong', label: 'Strong', colour: 'bg-pitch', text: 'text-pitch' },
+    { key: 'exceptional', label: 'Exceptional', colour: 'bg-violet', text: 'text-violet' },
+  ];
+  const index = Math.max(0, BANDS.findIndex((b) => b.key === item.band));
+  const band = BANDS[index];
+
+  return (
+    <div>
+      <div className="flex flex-wrap items-baseline justify-between gap-2 mb-1">
+        <span className="text-sm text-ink-600">
+          {item.label}
+          {item.sport && <span className="text-ink-400 text-xs"> · {item.sport}</span>}
+        </span>
+        <span className="flex items-baseline gap-2">
+          <span className="stat-value">{item.value}<span className="text-ink-400 text-xs">{item.unit ? ` ${item.unit}` : ''}</span></span>
+          <span className={`chip ${band.text} border`} style={{ borderColor: 'currentColor', background: 'transparent' }}>
+            {band.label}
+          </span>
+        </span>
+      </div>
+      <div className="flex gap-1">
+        {BANDS.slice(1).map((b, i) => (
+          <span
+            key={b.key}
+            className={`h-2 flex-1 rounded-full ${i <= index - 1 ? b.colour : 'bg-surface-sunken'}`}
+            title={`${b.label}: ${item.higherIsBetter ? 'at or above' : 'at or below'} ${item.thresholds[b.key] ?? '—'}`}
+          />
+        ))}
+      </div>
+      <div className="flex justify-between mt-1 text-[10px] text-ink-200 font-mono">
+        <span>{item.thresholds.developing ?? '—'}</span>
+        <span>{item.thresholds.competent ?? '—'}</span>
+        <span>{item.thresholds.strong ?? '—'}</span>
+        <span>{item.thresholds.exceptional ?? '—'}</span>
+      </div>
+    </div>
+  );
+}
+
 /**
- * Ludimos-style age-group benchmark comparison plus the public showcase
- * link toggle. Cricket only — the section only renders when the player is
- * registered for cricket (see the call site above).
+ * Turning the showcase on mints a link; turning it off destroys the token, so
+ * a copied URL genuinely stops working rather than merely being discouraged.
  */
-function CricketShowcaseCard({ playerId, player, canWrite, onChanged }) {
-  const [comparison, setComparison] = useState(null);
-  const [busy, setBusy] = useState(false);
+function ShowcaseControl({ open, onClose, player, onSaved }) {
+  const [headline, setHeadline] = useState('');
+  const [result, setResult] = useState(null);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    api.get(`/benchmarks/players/${playerId}`).then(setComparison).catch(() => setComparison(null));
-  }, [playerId]);
+    if (open) {
+      setHeadline(player.showcase_headline || '');
+      setResult(player.showcase_enabled && player.showcase_token
+        ? { enabled: true, token: player.showcase_token, path: `/showcase/${player.showcase_token}` }
+        : null);
+      setCopied(false); setError(null);
+    }
+  }, [open, player]);
 
-  async function toggleShowcase(enabled) {
+  const link = result?.token ? `${window.location.origin}${window.location.pathname}#/showcase/${result.token}` : null;
+
+  async function update(enabled, regenerate = false) {
     setBusy(true);
     setError(null);
     try {
-      await api.patch(`/players/${playerId}/showcase`, { enabled });
-      onChanged();
+      const r = await api.put(`/players/${player.id}/showcase`, { enabled, headline, regenerate });
+      setResult(r.enabled ? r : null);
+      onSaved();
     } catch (err) { setError(err); } finally { setBusy(false); }
   }
 
-  function copyLink() {
-    const url = `${window.location.origin}/showcase/${player.showcase_token}`;
-    navigator.clipboard?.writeText(url);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  }
-
   return (
-    <Section title="Cricket showcase" subtitle="Ludimos-style age-group benchmarks and a shareable profile">
-      <div className="p-4 space-y-4">
-        {comparison?.ageGroup ? (
-          comparison.benchmarks.length > 0 ? (
-            <div className="space-y-2">
-              <p className="text-xs text-ink-400">Age group: {comparison.ageGroup}</p>
-              {comparison.benchmarks.map((b) => {
-                const target = b.levels.target?.value ?? Object.values(b.levels)[0]?.value;
-                const hit = b.actual != null && target != null && (b.higherIsBetter ? b.actual >= target : b.actual <= target);
-                return (
-                  <div key={b.metric_key} className="flex items-center justify-between text-sm border-b border-line/60 pb-2 last:border-0">
-                    <span>{b.label}</span>
-                    <span className={hit ? 'text-pitch font-mono' : 'text-ink-400 font-mono'}>
-                      {b.actual ?? '—'} <span className="text-[10px] text-ink-400">/ target {target ?? '—'}</span>
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <p className="text-sm text-ink-400">No benchmarks set for {comparison.ageGroup} yet.</p>
-          )
-        ) : (
-          <p className="text-sm text-ink-400">Assign this player to a team to compare against their age group's benchmarks.</p>
-        )}
+    <Modal open={open} onClose={onClose} title="Showcase profile">
+      <div className="space-y-4">
+        <p className="text-sm text-ink-400">
+          A shareable summary of this athlete's record — career statistics, honours, squads and milestones —
+          for selectors and academies. Contact details, guardians, documents and assessments are never
+          included.
+        </p>
 
-        {canWrite && (
-          <div className="pt-3 border-t border-line">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium">Showcase profile</p>
-                <p className="text-xs text-ink-400">A public, read-only link — no contact details, no video.</p>
-              </div>
-              <button type="button" className={player.showcase_enabled ? 'btn-ghost' : 'btn-gold'} disabled={busy}
-                onClick={() => toggleShowcase(!player.showcase_enabled)}>
-                {player.showcase_enabled ? 'Disable' : 'Enable'}
+        <Field label="Headline" hint="One line, shown under their name">
+          <textarea className="input" rows={2} value={headline} onChange={(e) => setHeadline(e.target.value)}
+            placeholder="Top-order batter, strong through the covers. Looking for representative cricket." />
+        </Field>
+
+        {result ? (
+          <div className="space-y-3">
+            <div className="rounded-lg border border-pitch/30 bg-pitch/10 px-3.5 py-3">
+              <p className="text-sm font-semibold text-pitch">The profile is live.</p>
+              <p className="text-xs text-pitch/80 mt-1">Anyone with this link can open it. No sign-in is needed.</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 rounded-lg border border-line bg-surface-sunken px-3 py-2.5 font-mono text-[11px] text-ink break-all">
+                {link}
+              </code>
+              <button
+                type="button"
+                className="btn-ghost shrink-0"
+                onClick={() => navigator.clipboard?.writeText(link).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); })}
+              >
+                {copied ? 'Copied' : 'Copy'}
               </button>
             </div>
-            {player.showcase_enabled && player.showcase_token && (
-              <div className="mt-2 flex items-center gap-2">
-                <input readOnly className="input text-xs" value={`${window.location.origin}/showcase/${player.showcase_token}`} />
-                <button type="button" className="btn-quiet text-xs whitespace-nowrap" onClick={copyLink}>{copied ? 'Copied!' : 'Copy link'}</button>
-              </div>
-            )}
             <ErrorNote error={error} />
+            <div className="flex flex-wrap justify-end gap-2">
+              <button type="button" className="btn-ghost" disabled={busy} onClick={() => update(true, true)}>
+                Reissue link
+              </button>
+              <button type="button" className="btn-ghost" disabled={busy} onClick={() => update(true)}>
+                Save headline
+              </button>
+              <button type="button" className="btn-danger" disabled={busy} onClick={() => update(false)}>
+                Withdraw
+              </button>
+            </div>
+            <p className="text-xs text-ink-400">
+              Withdrawing destroys the link. Reissuing replaces it, so anything shared previously stops working.
+            </p>
           </div>
+        ) : (
+          <>
+            <ErrorNote error={error} />
+            <div className="flex justify-end gap-2">
+              <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
+              <button type="button" className="btn-gold" disabled={busy} onClick={() => update(true)}>
+                {busy ? 'Publishing…' : 'Publish showcase'}
+              </button>
+            </div>
+          </>
         )}
       </div>
-    </Section>
+    </Modal>
   );
 }

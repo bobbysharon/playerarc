@@ -19,7 +19,8 @@
     "start": "npm run start --workspace server",
     "demo:data": "node scripts/export-demo-data.mjs && node scripts/build-demo-engine.mjs",
     "build:demo": "npm run build:demo --workspace web",
-    "preview:demo": "npm run preview --workspace web"
+    "preview:demo": "npm run preview --workspace web",
+    "build:pages": "npm run build:demo && node scripts/publish-docs.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.1.0"

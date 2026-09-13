@@ -22,7 +22,7 @@ complete sporting journey from one place?*
 | **Teams** | Squads by sport, age group and season, with roster history that is closed rather than deleted |
 | **Tournaments** | Competitions, entered teams, fixtures, results, awards and per-tournament leaderboards |
 | **Matches** | Fixtures, playing XI / lineup, and per-player statistics entered against the sport's own schema |
-| **Ball-by-ball capture** | Every delivery, shot, goal, rally and card, with actors, coordinates and full sport-specific detail |
+| **Ball-by-ball capture** | Every delivery, shot, goal, rally and card — in each sport's own vocabulary, with actors, coordinates and full detail |
 | **Match analysis** | Scorecards, run rates, partnerships, phases, wagon wheels, pitch maps, shot maps, momentum, head-to-head and commentary — all derived from the events |
 | **Training** | Sessions, exercises, attendance, per-athlete performance and effort scores, coach notes |
 | **Assessments** | Configurable criteria across physical, technical, tactical and behavioural categories — append-only, so development is visible over years |
@@ -31,8 +31,14 @@ complete sporting journey from one place?*
 | **Rankings** | Per-sport leaderboards with qualification thresholds; never cross-sport |
 | **Reports** | Player, team, tournament, sport and coach reports, with CSV, Excel and PDF export |
 | **User manager** | Accounts, roles, data scopes, staff and athlete links, passwords — super admin only |
+| **Drill library** | Reusable drills with coaching points and equipment, and session plans built from them |
+| **Ball tracking** | Release speed, pitch map to the centimetre, stump-line analysis and consistency against a stated target |
+| **Fitness** | Test results, strength numbers and logged workouts, trended per metric |
+| **Benchmarks** | Age-group standards, so a number is read against what "good" means for that group |
+| **Selection** | Athletes compared side by side on figures already in their records |
+| **Announcements** | Notices to the whole club, one sport, a squad or named athletes |
+| **Showcase profile** | A shareable, revocable record for selectors — honours and statistics, never contact details |
 | **Administration** | Audit log, settings, demo data management |
-| **Cricket coaching add-ons** *(cricket only)* | Delivery-level swing/seam deviation tracking, age-group benchmarks compared against real career stats, a reusable drill library, "digital groups" for training outside full squads, squad/group/player messaging, and a public no-video showcase profile link. See `docs/DATA-MODEL.md#cricket-only-tables-ludimos-style-features`. Not part of the GitHub Pages demo — the static demo dataset/engine wasn't extended to cover these. |
 
 ---
 
@@ -40,28 +46,52 @@ complete sporting journey from one place?*
 
 ### 1. Live demo — GitHub Pages
 
-The repository publishes a **browser-only demonstration** to GitHub Pages. It contains the full
-interface and the seeded club, and it runs entirely in the page — no server, no database.
+The repository ships a **browser-only demonstration**: the full interface and the seeded club,
+running entirely in the page with no server and no database.
 
-One-time setup, then every push to `main` deploys automatically:
+The built demo is committed to `docs/`, so publishing it takes one setting:
 
-1. Push this repository to GitHub
-2. Open **Settings → Pages** and set **Source** to **GitHub Actions**
-3. Push to `main`; the workflow in `.github/workflows/deploy-demo.yml` builds and publishes
+**Settings → Pages → Source → "Deploy from a branch" → Branch: `main`, folder: `/docs` → Save.**
 
-Your site appears at `https://<username>.github.io/<repository-name>/`. The base path is taken from
-the repository name automatically.
+Your site appears at `https://<username>.github.io/<repository-name>/` within a minute or two.
+
+> **If it shows the README instead of the app**, the folder is still set to `/ (root)`. GitHub then
+> runs the repository through Jekyll and renders `README.md`. Changing the folder to `/docs` is the
+> fix — `docs/` contains an `index.html` and a `.nojekyll` file, which is what stops Jekyll taking
+> over. Hard-refresh afterwards, since the old page will be cached.
+
+Rebuilding it after a change:
+
+```bash
+npm run build:pages      # builds the demo and stages it in docs/
+git add docs && git commit -m "Rebuild demo" && git push
+```
+
+The repository name is baked into the asset paths. If yours is not `playerarc`, set `VITE_BASE` in
+`web/.env.demo` to `/<your-repository-name>/` before running `npm run build:pages`.
+
+**If the site returns a 404 saying "you must provide an index.html file"**, something deployed the
+repository root instead of the built app. The usual cause is the **Static HTML** workflow offered on
+the Pages settings screen: pressing *Configure* on that card adds a second workflow that uploads
+`path: '.'`, and whichever workflow deploys last wins. Check the Actions tab — if the most recent
+run is not **Deploy demo to GitHub Pages**, delete the stray workflow file from
+`.github/workflows/` and re-run ours. The workflow here refuses to publish an empty site, so a
+failure shows up as a red build rather than a 404.
+
+**Alternative — GitHub Actions.** `.github/workflows/deploy-demo.yml` builds and publishes on every
+push and picks the repository name up automatically, so nothing is committed. It only runs if
+**Settings → Pages → Source** is set to **GitHub Actions**; while the source is "Deploy from a
+branch", the workflow succeeds and publishes nothing. Use whichever you prefer, not both.
 
 **What is real in the demo:** every screen, the seeded club, career statistics computed by the same
-engine the server uses, per-sport ratings, leaderboards, role permissions and field redaction.
-Changes you make persist until you reload the page.
+engine the server uses, ball-by-ball capture and the full match analysis, per-sport ratings,
+leaderboards, role permissions and field redaction. Changes you make persist until you reload.
 
-**What is not:** sign-in is not secured — the demo compares a shared password rather than a hash,
+**What is not:** sign-in is not secured — the demo compares a password in memory rather than a hash,
 because password hashes must never ship to a browser. File uploads, Excel and PDF reports need the
 server. Use the demo to show people the platform, not to run the club.
 
-> Building it locally: `npm run build:demo`, then `npm run preview:demo`.
-> If your repository has a different name, set `VITE_BASE` in `web/.env.demo`.
+> Previewing locally: `npm run build:demo`, then `npm run preview:demo`.
 
 ### 2. Locally — the real platform
 
@@ -104,9 +134,9 @@ Password for all: `Karwan@2026`
 
 | Email | Role | What they see |
 | --- | --- | --- |
-| `admin@playerarc.local` | Super Admin (Bobby Sharon) | Everything, including users, settings and the audit log. Its own account can only have its password changed — role, email and name are locked. It also cannot log training sessions, assessments or achievements/awards; that stays with coaches and sport admins |
+| `admin@playerarc.local` | Administrator | Everything, including users, settings and the audit log |
 | `director@karwansportsclub.com` | Sports Director | All sports, athletes, teams, competitions and performance data |
-| `cricket.admin@karwansportsclub.com` | Sport Administrator | Cricket only |
+| `cricket.admin@playerarc.local` | Sport Administrator | Cricket only |
 | `coach.cricket@karwansportsclub.com` | Coach | Only the cricket teams assigned to them; contact details are hidden |
 | `stats@karwansportsclub.com` | Statistician | Match records and statistics across all sports |
 | `player@karwansportsclub.com` | Player | Their own record only |
@@ -129,8 +159,8 @@ npm start            # the API serves the built app on :4000
 
 ```bash
 npm start                       # in one terminal
-node scripts/smoke-test.mjs     # in another — 78 checks against the live API
-node scripts/demo-test.mjs      # 68 checks against the browser demo
+node scripts/smoke-test.mjs     # in another — 98 checks against the live API
+node scripts/demo-test.mjs      # 78 checks against the browser demo
 ```
 
 `package-lock.json` is committed, so every environment installs the same dependency tree.
@@ -151,7 +181,7 @@ native dependencies.
 playerarc/
 ├── server/                     Node.js + Express API, SQLite via better-sqlite3
 │   └── src/
-│       ├── db/schema.sql       42 tables — the full relational model
+│       ├── db/schema.sql       33 tables — the full relational model
 │       ├── db/seed.js          Sport definitions, criteria, and the demo club
 │       ├── lib/
 │       │   ├── sport-configs.js   Every sport defined as data, not code
@@ -161,20 +191,20 @@ playerarc/
 │       │   ├── formula.js         Safe evaluator for configured formulas
 │       │   ├── permissions.js     Role matrix and field redaction
 │       │   ├── timeline.js        Career timeline and milestone detection
-│       │   ├── repo.js            Shared career/statistics queries
-│       │   └── cricket-scope.js   Cricket-only gate for the Ludimos-style additions
+│       │   └── repo.js            Shared career/statistics queries
 │       ├── middleware/         auth · scope · audit · errors
-│       └── routes/             18 route modules (incl. cricket-only benchmarks, drills, groups, messages, showcase)
+│       └── routes/             12 route modules
 ├── web/                        React 18 + Vite + Tailwind
 │   └── src/
 │       ├── components/ui.jsx   Shared interface: tables, charts, career spine
 │       ├── lib/                API client, auth context, formatting
-│       ├── pages/              25 screens (incl. Messages and the public Showcase page)
+│       ├── pages/              20 screens
 │       └── demo/               Browser-only backend for the static build
 │           ├── api.js          Answers the same calls the server does
 │           ├── dataset.json    Exported from the seeded database
 │           └── engine/         Generated from the server's shared modules
 ├── docs/                       Architecture, data model, permissions, API
+│                               — and the built demo GitHub Pages serves
 ├── .github/workflows/          GitHub Pages deployment
 ├── Dockerfile · render.yaml    Hosting the real platform
 └── scripts/
@@ -210,7 +240,7 @@ Team memberships get an end date. Status changes append to a status history. Pos
 jersey changes append to an attribute history. Assessments are never edited in place. This is what
 makes the platform a longitudinal record rather than a snapshot of the current squad.
 
-**4. A match is recorded as events, and everything else is read off them.**
+**4. A match is recorded as events — in any sport — and everything else is read off them.**
 A scorer records one delivery — runs, extras, shot, length, line, delivery type, speed, whether the
 batter was in control, who took the catch, where the ball went. From that single stream the platform
 derives the batting and bowling cards, run rate, partnerships, fall of wickets, phase splits, wagon
@@ -218,7 +248,16 @@ wheel, pitch map, dot-ball and control percentages, head-to-head matchups and th
 and then the athlete's career record, rating and league position, because the scorecard itself is
 derived too. Nobody types a scorecard for a match that was scored ball by ball, and correcting one
 delivery corrects every figure built on it. Football, basketball and the racket sports work the same
-way with their own event types, defined as configuration rather than code.
+way with their own event types, defined as configuration rather than code: football and futsal
+record shots, key passes, defensive actions, saves, cards and substitutions; basketball records
+shots by value, rebounds, turnovers and fouls; badminton, table tennis and volleyball record every
+rally with how the point was won and how long it lasted. All seven sports are verified end to end —
+capture, derivation and analysis — by the test suite.
+
+One consequence worth knowing: once a match is scored ball by ball, the events become the source of
+truth for anything they can produce. If a scorecard was typed first, those figures are recomputed
+from the deliveries, because otherwise the same runs would be counted twice. The scoring console
+says so plainly the first time it happens rather than letting a career average change quietly.
 
 **5. The interface is dark, and colour carries meaning.**
 Near-black canvas, slate panels, and an amber-to-orange gradient on everything primary — the same
@@ -302,6 +341,86 @@ mid-over; an older one is voided rather than deleted, so the correction stays on
 Then open **Analysis**. Nothing there is stored — it is all computed from the events on each read,
 which is why fixing one delivery fixes the scorecard, the run rate, the partnership, the bowler's
 economy, the athlete's career average and their position on the leaderboard at once.
+
+## The coaching layer
+
+Four additions sit alongside the match record rather than replacing any of it.
+
+**Drill library and session plans.** A drill is written once — coaching points, equipment, age
+groups, how to make it harder — and reused. A session plan is an ordered set of drills with timings;
+applying one to a session fills in its drills, and attendance still pre-fills from the roster. Open
+**Drill library** under Development.
+
+**Age-group benchmarks.** Twenty-four runs an innings is excellent at under-14 and modest for a
+senior, so a raw figure says little on its own. Benchmarks give each metric four bands — developing,
+competent, strong, exceptional — per age group, and the athlete's Development tab reads their record
+against the group they actually play in. Metrics where lower is better, like economy rate, band the
+other way round. Assessment criteria are banded the same way.
+
+**Announcements.** A notice to the whole club, one sport, a single squad or a named handful of
+athletes, with a priority and an expiry. Coaches see club-wide notices and anything for their own
+teams; an athlete or guardian sees what was addressed to them.
+
+**Showcase profile.** A shareable summary of an athlete's record for selectors and academies —
+career statistics, honours, squads and milestones. The link is the credential: there is no sign-in,
+and withdrawing it destroys the token so a copied URL genuinely stops working. Contact details,
+guardians, documents, assessments and coach notes are never fetched for it, so there is nothing to
+leak. Publish it from the athlete's profile.
+
+## Ball tracking
+
+Open **Ball tracking** under Analysis. A tracking session is a spell in the nets, a
+bowling-machine block, or the tracked part of a match, and every delivery in it is measured.
+
+The screen is built as an instrument panel rather than a set of tables: a speed dial with a peak
+marker, a two-ring consistency gauge, a stump tower lit by how often each stump was struck, and the
+pitch drawn in perspective so length reads as distance. Every graphic is an SVG generated from the
+session's own numbers — there is no chart library behind them, because the shapes are specific.
+Tapping a bowler re-reads all of it from their deliveries alone.
+
+**What is measured and what is derived.** A delivery carries raw numbers: release speed, speed off
+the pitch, where it bounced in centimetres, where it would have met the stumps, how much it moved.
+Everything a coach looks at is worked out from those — the pitch map, the length and line
+distribution, the stump-line breakdown, the consistency score. Correct one delivery's coordinates
+and every figure built on it is right on the next read.
+
+| Feature | How it works here |
+| --- | --- |
+| **Speed** | Release speed and speed off the pitch are recorded separately, because they answer different questions: the first is the bowler's effort, the second is what the batter faced. The drop between them is derived, and pace consistency is reported alongside the average |
+| **Pitch mapping** | Coordinates in centimetres from a fixed origin — the batter's stumps at (0,0). Length and line zones are computed from the coordinate, so a map and a zone reading can never disagree |
+| **Stump line** | Line *and* height together: a ball on middle that is still climbing goes over the top, so both are needed. Reported as a hit percentage with a per-stump breakdown |
+| **Consistency zones** | Scored against a zone the bowler stated beforehand, stored as a rectangle in centimetres. A hit rate says how often they landed it; a tightness figure says how far out the misses were |
+| **Scene calibration** | Pitch length, width, stump dimensions and crease distance are recorded per session. A centimetre means nothing without the frame it was measured in, so sessions carry theirs and uncalibrated ones are flagged |
+| **Bowling machine** | A session mode with the machine's make, speed and setting stored, so machine work and live bowling are never averaged together |
+
+**What this does not do.** No computer vision runs in this platform, and none is claimed. The
+measurements come from a coach with a speed gun, a phone app, or a tracking provider — every
+delivery records its `source`, so a measured figure is never confused with an estimated one. The
+schema and the ingest endpoint are shaped to take a provider's output directly.
+
+## Fitness
+
+Test results, strength numbers and logged gym work sit on the athlete's record beside their playing
+history. Each metric builds its own trend, and the direction of improvement follows the metric: a
+faster 20m sprint is a smaller number, and the platform reads it that way.
+
+## Evidence-led selection
+
+`/selection/compare` puts a shortlist side by side on measures every one of them has — matches,
+headline statistics, the latest assessment, training attendance, tracked accuracy and recent fitness
+tests. Nothing is weighted or ranked. The point is to make a selection argument checkable, not to
+make the decision.
+
+## The administrator account
+
+`admin@playerarc.local` is the account that guarantees the club can always get
+back in, so two things about it are fixed: **its role cannot be changed and it cannot be suspended or
+deleted**. Everything else — name, contact details, and above all its password — is editable exactly
+like any other account's.
+
+Every other account can be created, edited, suspended and deleted, and only the administrator can do
+any of it. The rules are enforced by the API, not merely greyed out in the interface, and the test
+suite asserts all four.
 
 ## A note on passwords
 

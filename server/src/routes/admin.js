@@ -70,22 +70,28 @@ router.post('/users', adminOnly, asyncHandler(async (req, res) => {
 }));
 
 router.put('/users/:id', adminOnly, asyncHandler(async (req, res) => {
-  const before = db.prepare('SELECT u.*, r.key AS role FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = ?').get(req.params.id);
+  const before = db
+    .prepare('SELECT u.*, r.key AS role FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = ?')
+    .get(req.params.id);
   if (!before) throw new ApiError(404, 'That user does not exist.');
-  // The Super Admin account is the platform's own administrator record —
-  // its identity and role are fixed. Only its password may ever change,
-  // and only through the dedicated password endpoint below.
-  // (Checked against the raw request body, not the parsed one: zod's
-  // schema defaults — e.g. status: 'active' — would otherwise look like
-  // an attempted change even when the caller only sent a password.)
-  if (before.role === 'super_admin') {
-    const attemptedOtherFields = Object.keys(req.body || {}).some((k) => k !== 'password');
-    if (attemptedOtherFields) {
-      throw new ApiError(403, 'The administrator account cannot be edited. Only its password can be changed.');
-    }
-  }
-
   const body = userSchema.partial().parse(req.body);
+
+  // The administrator account is what guarantees someone can always get back
+  // into the platform, so its role is fixed. Everything else about it — name,
+  // contact details, password — is editable as normal.
+  if (before.role === 'super_admin' && body.role && body.role !== 'super_admin') {
+    throw new ApiError(
+      409,
+      'The administrator role cannot be changed. Promote another account to administrator first, then change this one.',
+    );
+  }
+  if (before.role === 'super_admin' && body.status && body.status !== 'active') {
+    const others = db
+      .prepare(`SELECT COUNT(*) AS c FROM users u JOIN roles r ON r.id = u.role_id
+                WHERE r.key = 'super_admin' AND u.status = 'active' AND u.id != ?`)
+      .get(before.id).c;
+    if (others === 0) throw new ApiError(409, 'This is the last active administrator, so it cannot be suspended.');
+  }
 
   const sets = [];
   const params = [];

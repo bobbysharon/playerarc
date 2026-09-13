@@ -29,7 +29,7 @@ const check = async (name, fn) => {
   }
 };
 
-const login = await req('/auth/login', { method: 'POST', body: { email: 'admin@karwansportsclub.com', password: 'Karwan@2026' } });
+const login = await req('/auth/login', { method: 'POST', body: { email: 'admin@playerarc.local', password: 'Karwan@2026' } });
 token = login.d.token;
 
 await check('sign in returns a token', () => !!token);
@@ -181,7 +181,7 @@ await check('no endpoint ever returns a stored password', async () => {
   return !JSON.stringify(list.d).includes('password_hash') && !JSON.stringify(list.d).match(/"password"/);
 });
 await check('cannot delete your own account', async () => {
-  const me = (await req('/admin/users')).d.users.find((u) => u.email === 'admin@karwansportsclub.com');
+  const me = (await req('/admin/users')).d.users.find((u) => u.email === 'admin@playerarc.local');
   const r = await req(`/admin/users/${me.id}`, { method: 'DELETE' });
   return r.status === 409;
 });
@@ -262,10 +262,20 @@ await check('partnerships and fall of wickets line up', async () => {
 await check('the scorecard matches the analysis exactly', async () => {
   const a = await req(`/matches/${bbMatchId}/analysis`);
   const detail = await req(`/matches/${bbMatchId}`);
-  const card = a.d.periods[0].battingCard.filter((b) => b.playerId).slice(0, 3);
-  return card.every((b) => {
-    const perf = detail.d.performances.find((p) => p.player_id === b.playerId);
-    return perf && perf.stats.runs === b.runs && perf.stats.balls_faced === b.balls;
+
+  // An athlete can bat in more than one innings, so the scorecard is the sum
+  // across every innings rather than whatever the first one shows.
+  const totals = new Map();
+  for (const period of a.d.periods) {
+    for (const b of period.battingCard.filter((x) => x.playerId)) {
+      const current = totals.get(b.playerId) || { runs: 0, balls: 0 };
+      totals.set(b.playerId, { runs: current.runs + b.runs, balls: current.balls + b.balls });
+    }
+  }
+  const sample = [...totals.entries()].slice(0, 4);
+  return sample.length > 0 && sample.every(([playerId, expected]) => {
+    const perf = detail.d.performances.find((p) => p.player_id === playerId);
+    return perf && perf.stats.runs === expected.runs && perf.stats.balls_faced === expected.balls;
   });
 });
 await check('one athlete\'s own match view', async () => {
@@ -393,7 +403,8 @@ await check('basketball analysis produces a shot chart and quarters', async () =
   const matches = (await req('/matches?limit=200')).d.matches.filter((m) => m.sport_code === 'basketball');
   for (const m of matches) {
     const a = await req(`/matches/${m.id}/analysis`);
-    if (a.d.totalEvents > 0) return a.d.overall.shotMap.length > 0 && a.d.periods.length === 4;
+    // Four quarters at minimum; a scorer may have opened more.
+    if (a.d.totalEvents > 0) return a.d.overall.shotMap.length > 0 && a.d.periods.length >= 4;
   }
   return false;
 });
@@ -408,6 +419,307 @@ await check('racket analysis produces rally progression and momentum', async () 
     }
   }
   return false;
+});
+
+
+/* ---- Drill library, session plans, benchmarks, announcements, showcase ---- */
+await check('drill library', async () => {
+  const r = await req('/drills');
+  return r.d.drills.length > 5 && r.d.drills.every((d) => d.category && d.times_used >= 0);
+});
+await check('drills filter by sport and category', async () => {
+  const r = await req('/drills?category=technical');
+  return r.d.drills.length > 0 && r.d.drills.every((d) => d.category === 'technical');
+});
+let newDrillId;
+await check('add a drill', async () => {
+  const r = await req('/drills', {
+    method: 'POST',
+    body: { name: `Test drill ${Date.now()}`, category: 'skills', duration_minutes: 15, coaching_points: 'Watch the ball' },
+  });
+  newDrillId = r.d.drill?.id;
+  return r.status === 201 && !!newDrillId;
+});
+await check('impossible player counts refused', async () => {
+  const r = await req('/drills', {
+    method: 'POST', body: { name: `Bad ${Date.now()}`, players_min: 10, players_max: 4 },
+  });
+  return r.status === 422;
+});
+await check('session plans carry ordered drills', async () => {
+  const r = await req('/session-templates');
+  return r.d.templates.length > 0 && r.d.templates.every((t) => t.drills.every((d, i) => d.sort_order === i));
+});
+await check('build a session from a plan', async () => {
+  const session = (await req('/training?limit=1')).d.sessions[0];
+  const template = (await req('/session-templates')).d.templates[0];
+  const applied = await req(`/training/${session.id}/apply-template/${template.id}`, { method: 'POST' });
+  const drills = await req(`/training/${session.id}/drills`);
+  return applied.status === 200 && drills.d.drills.length === template.drills.length;
+});
+await check('set drills on a session directly', async () => {
+  const session = (await req('/training?limit=1')).d.sessions[0];
+  const r = await req(`/training/${session.id}/drills`, {
+    method: 'PUT', body: { drills: [{ drill_id: newDrillId, duration_minutes: 12 }] },
+  });
+  const after = await req(`/training/${session.id}/drills`);
+  return r.status === 200 && after.d.drills.length === 1 && after.d.drills[0].drill_id === newDrillId;
+});
+
+await check('benchmarks exist per age group', async () => {
+  const r = await req('/benchmarks');
+  return r.d.benchmarks.length > 10 && r.d.benchmarks.some((b) => b.source === 'assessment');
+});
+await check('an athlete is banded against their age group', async () => {
+  for (const p of (await req('/players?pageSize=60')).d.players) {
+    const b = await req(`/players/${p.id}/benchmarks`);
+    if (b.d.career.length) {
+      return ['below', 'developing', 'competent', 'strong', 'exceptional'].includes(b.d.career[0].band)
+        && !!b.d.ageGroup;
+    }
+  }
+  return false;
+});
+await check('lower-is-better metrics band correctly', async () => {
+  // Economy rate: a low number is good, so a small value must not read as "below".
+  const r = await req('/benchmarks?source=career');
+  const economy = r.d.benchmarks.find((b) => b.metric === 'economy');
+  return economy && economy.higher_is_better === 0 && economy.exceptional < economy.developing;
+});
+
+let noticeId;
+await check('send an announcement to a squad', async () => {
+  const team = (await req('/teams')).d.teams[0];
+  const r = await req('/announcements', {
+    method: 'POST',
+    body: { title: 'Test notice', body: 'Session moved.', audience: 'team', team_id: team.id, priority: 'important' },
+  });
+  noticeId = r.d.announcement?.id;
+  return r.status === 201 && !!noticeId;
+});
+await check('a squad announcement needs a squad', async () => {
+  const r = await req('/announcements', { method: 'POST', body: { title: 'x', body: 'y', audience: 'team' } });
+  return r.status === 422;
+});
+await check('announcement to named athletes', async () => {
+  const ids = (await req('/players?pageSize=2')).d.players.map((p) => p.id);
+  const r = await req('/announcements', {
+    method: 'POST',
+    body: { title: 'Selected', body: 'You are in the squad.', audience: 'players', playerIds: ids },
+  });
+  const list = await req('/announcements');
+  const found = list.d.announcements.find((a) => a.id === r.d.announcement.id);
+  return r.status === 201 && found.recipients.length === 2;
+});
+await check('remove an announcement', async () => (await req(`/announcements/${noticeId}`, { method: 'DELETE' })).status === 200);
+
+let showcaseToken;
+await check('publish a showcase profile', async () => {
+  const p = (await req('/players?pageSize=1')).d.players[0];
+  const r = await req(`/players/${p.id}/showcase`, {
+    method: 'PUT', body: { enabled: true, headline: 'Available for trials.' },
+  });
+  showcaseToken = r.d.token;
+  return r.status === 200 && !!showcaseToken && r.d.path.includes(showcaseToken);
+});
+await check('the showcase is readable without signing in', async () => {
+  const r = await fetch(`${BASE}/players/showcase/${showcaseToken}`);
+  const d = await r.json();
+  return r.ok && d.athlete.name && Array.isArray(d.careers) && Array.isArray(d.achievements);
+});
+await check('the showcase never exposes private details', async () => {
+  const d = await (await fetch(`${BASE}/players/showcase/${showcaseToken}`)).json();
+  const body = JSON.stringify(d);
+  return !['"phone"', '"email"', '"guardian_name"', '"address"', '"emergency_phone"', '"notes"']
+    .some((field) => body.includes(field));
+});
+await check('withdrawing the showcase kills the link', async () => {
+  const p = (await req('/players?pageSize=1')).d.players[0];
+  await req(`/players/${p.id}/showcase`, { method: 'PUT', body: { enabled: false } });
+  return (await fetch(`${BASE}/players/showcase/${showcaseToken}`)).status === 404;
+});
+
+/* ---- Every sport captures, not only cricket ---- */
+await check('all seven sports have event definitions', async () => {
+  const sports = (await req('/sports')).d.sports;
+  return sports.length === 7 && sports.every((s) => s.config?.events?.types?.length > 0 && s.config.events.derive.length > 0);
+});
+await check('each sport records events in its own vocabulary', async () => {
+  const sports = (await req('/sports')).d.sports;
+  const matches = (await req('/matches?limit=200')).d.matches;
+  let covered = 0;
+  for (const sport of sports) {
+    for (const m of matches.filter((x) => x.sport_code === sport.code)) {
+      const ev = await req(`/matches/${m.id}/events`);
+      if (ev.d.total > 0) { covered += 1; break; }
+    }
+  }
+  return covered === sports.length;
+});
+
+
+/* ---- The administrator account is protected ---- */
+await check('administrator role cannot be changed', async () => {
+  const admin = (await req('/admin/users')).d.users.find((u) => u.role === 'super_admin');
+  const r = await req(`/admin/users/${admin.id}`, { method: 'PUT', body: { role: 'coach' } });
+  return r.status === 409;
+});
+await check('last administrator cannot be suspended', async () => {
+  const admin = (await req('/admin/users')).d.users.find((u) => u.role === 'super_admin');
+  const r = await req(`/admin/users/${admin.id}`, { method: 'PUT', body: { status: 'suspended' } });
+  return r.status === 409;
+});
+await check('administrator details and password stay editable', async () => {
+  const admin = (await req('/admin/users')).d.users.find((u) => u.role === 'super_admin');
+  const details = await req(`/admin/users/${admin.id}`, { method: 'PUT', body: { phone: '+971 50 111 2222' } });
+  const pw = await req(`/admin/users/${admin.id}/password`, { method: 'POST', body: { password: 'TempAdminPass1', mustChange: false } });
+  const signIn = await req('/auth/login', { method: 'POST', body: { email: admin.email, password: 'TempAdminPass1' } });
+  // Restore the documented password so the suite is repeatable.
+  await req(`/admin/users/${admin.id}/password`, { method: 'POST', body: { password: 'Karwan@2026', mustChange: false } });
+  return details.status === 200 && pw.status === 200 && signIn.status === 200;
+});
+await check('other accounts can be created, edited and deleted', async () => {
+  const created = await req('/admin/users', {
+    method: 'POST',
+    body: { full_name: 'Temp Staff', email: `temp.${Date.now()}@playerarc.local`, password: 'Temporary123', role: 'coach' },
+  });
+  const edited = await req(`/admin/users/${created.d.id}`, { method: 'PUT', body: { role: 'statistician' } });
+  const removed = await req(`/admin/users/${created.d.id}`, { method: 'DELETE' });
+  return created.status === 201 && edited.status === 200 && removed.status === 200;
+});
+
+
+/* ---- Ball tracking, fitness, templates, selection ---- */
+let trackSessionId;
+await check('tracking sessions are seeded and calibrated', async () => {
+  const r = await req('/tracking/sessions');
+  trackSessionId = r.d.sessions[0]?.id;
+  return r.d.sessions.length > 5
+    && r.d.sessions.every((x) => x.calibrated === 1)
+    && r.d.sessions.some((x) => x.mode === 'bowling_machine');
+});
+await check('a session reports speed, map, stumps and consistency', async () => {
+  const r = await req(`/tracking/sessions/${trackSessionId}`);
+  const s = r.d.summary;
+  return s.speed.averageRelease > 50 && s.pitchMap.points.length > 0
+    && s.stumpLine.assessed > 0 && s.consistency.hitRate >= 0;
+});
+await check('pitch coordinates resolve to the right zones', async () => {
+  const r = await req(`/tracking/sessions/${trackSessionId}`);
+  // A good length sits between 400 and 700cm from the batter's stumps.
+  return r.d.deliveries
+    .filter((d) => d.length_zone === 'good')
+    .every((d) => d.pitch_y_cm > 400 && d.pitch_y_cm <= 700);
+});
+await check('the stump reading agrees with the measurement', async () => {
+  const r = await req(`/tracking/sessions/${trackSessionId}`);
+  // Anything wider than half a stump line cannot be hitting.
+  return r.d.deliveries
+    .filter((d) => d.hits_stumps === 1 && d.stump_x_cm != null)
+    .every((d) => Math.abs(d.stump_x_cm) <= 11.43 + 0.01);
+});
+await check('speed drop is derived, not typed', async () => {
+  const r = await req(`/tracking/sessions/${trackSessionId}`);
+  const d = r.d.deliveries.find((x) => x.release_speed_kph && x.speed_off_pitch_kph);
+  const expected = ((d.release_speed_kph - d.speed_off_pitch_kph) / d.release_speed_kph) * 100;
+  return Math.abs(d.speed_drop_percent - expected) < 0.15;
+});
+await check('recording a delivery derives its zones and target score', async () => {
+  const session = (await req(`/tracking/sessions/${trackSessionId}`)).d;
+  const bowler = session.bowlers[0]?.player.id ?? null;
+  const r = await req(`/tracking/sessions/${trackSessionId}/deliveries`, {
+    method: 'POST',
+    body: {
+      bowler_id: bowler, batter_handedness: 'right',
+      release_speed_kph: 139.4, speed_off_pitch_kph: 104.2,
+      pitch_x_cm: 14, pitch_y_cm: 560, bounce_height_cm: 74,
+      stump_x_cm: 6, stump_z_cm: 40, delivery_type: 'seam', runs: 0, outcome: 'dot',
+    },
+  });
+  const d = r.d.deliveries[0];
+  return r.status === 201 && d.length_zone === 'good' && d.line_zone === 'off_stump'
+    && d.hits_stumps === 1 && d.stump_hit === 'off' && d.speed_drop_percent > 20;
+});
+await check('a bowling-machine session needs its speed setting', async () => {
+  const r = await req('/tracking/sessions', {
+    method: 'POST',
+    body: { sport_id: 1, mode: 'bowling_machine', title: 'Machine block', session_date: '2026-09-01' },
+  });
+  return r.status === 422;
+});
+await check('scene calibration is recorded', async () => {
+  const created = await req('/tracking/sessions', {
+    method: 'POST', body: { sport_id: 1, mode: 'nets', title: `Calibration test ${Date.now()}`, session_date: '2026-09-01' },
+  });
+  const r = await req(`/tracking/sessions/${created.d.session.id}/calibration`, {
+    method: 'PUT', body: { method: 'crease_markers', pitch_length_cm: 2012, stump_height_cm: 71.1 },
+  });
+  return r.status === 200 && r.d.session.calibrated === 1 && r.d.session.calibration_method === 'crease_markers';
+});
+await check("an athlete's tracking report spans every session", async () => {
+  const session = (await req(`/tracking/sessions/${trackSessionId}`)).d;
+  const id = session.bowlers[0].player.id;
+  const r = await req(`/players/${id}/tracking`);
+  return r.d.bowling.deliveries > 0 && r.d.bowling.trend.length > 0
+    && r.d.bowling.speed.peakRelease > 50 && r.d.bowling.consistency.score >= 0;
+});
+await check('consistency is measured against a stated target', async () => {
+  const r = await req(`/tracking/sessions/${trackSessionId}`);
+  return r.d.targets.length > 0
+    && r.d.deliveries.some((d) => d.in_target !== null && d.target_length);
+});
+await check('fitness records build a trend per metric', async () => {
+  for (const p of (await req('/players?pageSize=40')).d.players) {
+    const f = await req(`/players/${p.id}/fitness`);
+    if (f.d.series.length) {
+      return f.d.series.every((m) => m.points.length > 0 && m.latest !== null)
+        && f.d.summary.metricsTracked === f.d.series.length;
+    }
+  }
+  return false;
+});
+await check('a faster sprint counts as an improvement', async () => {
+  // Lower is better for a sprint, so the direction must not be read naively.
+  for (const p of (await req('/players?pageSize=40')).d.players) {
+    const f = await req(`/players/${p.id}/fitness`);
+    const sprint = f.d.series.find((m) => m.metric === 'sprint_20m');
+    if (sprint) return sprint.higherIsBetter === false && sprint.improved === (sprint.change < 0);
+  }
+  return false;
+});
+await check('record a fitness test', async () => {
+  const p = (await req('/players?pageSize=1')).d.players[0];
+  const r = await req('/fitness', {
+    method: 'POST',
+    body: {
+      player_id: p.id, record_date: '2026-09-10', kind: 'test', category: 'power',
+      metric: 'broad_jump', label: 'Standing broad jump', value: 2.34, unit: 'm', higher_is_better: 1,
+    },
+  });
+  return r.status === 201;
+});
+await check('assessment templates carry ordered criteria', async () => {
+  const r = await req('/assessment-templates');
+  return r.d.templates.length >= 4
+    && r.d.templates.every((t) => t.criteria.length > 0 && t.criteria.every((c, i) => c.sort_order === i))
+    && r.d.templates.some((t) => t.purpose === 'trial');
+});
+await check('a template needs at least one criterion', async () => {
+  const r = await req('/assessment-templates', {
+    method: 'POST', body: { name: `Empty ${Date.now()}`, criteria: [] },
+  });
+  return r.status === 422;
+});
+await check('selection compares athletes on shared measures', async () => {
+  const ids = (await req('/players?sport=1&pageSize=4')).d.players.map((p) => p.id);
+  const r = await req(`/selection/compare?sport=1&players=${ids.join(',')}`);
+  return r.status === 200 && r.d.rows.length >= 2 && r.d.columns.length > 0
+    && r.d.rows.every((row) => row.headline && row.matches >= 0);
+});
+await check('comparing fewer than two athletes is refused', async () => {
+  const ids = (await req('/players?pageSize=1')).d.players.map((p) => p.id);
+  const r = await req(`/selection/compare?sport=1&players=${ids.join(',')}`);
+  return r.status === 422;
 });
 
 /* ---- Single page app is served ---- */

@@ -3,9 +3,6 @@ import { api, setToken, getToken } from './api';
 
 const AuthContext = createContext(null);
 
-/** Kept in sync with server/src/lib/permissions.js SUPER_ADMIN_DENIED. */
-const SUPER_ADMIN_DENIED = ['training.write', 'assessments.write', 'achievements.write'];
-
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -24,7 +21,13 @@ export function AuthProvider({ children }) {
   const value = useMemo(() => ({
     user,
     loading,
-    /** Re-read the signed-in user, e.g. after they change their own password or a forced password change. */
+    /** Re-read the signed-in user, e.g. after they change their own password. */
+    async refresh() {
+      const d = await api.get('/auth/me');
+      setUser(d.user);
+      return d.user;
+    },
+    /** Re-read the signed-in user, e.g. after a forced password change. */
     async refresh() {
       const d = await api.get('/auth/me');
       setUser(d.user);
@@ -41,18 +44,10 @@ export function AuthProvider({ children }) {
       setToken(null);
       setUser(null);
     },
-    /**
-     * Mirrors the server permission matrix — the API enforces it regardless.
-     * The Super Admin's '*' covers everything except logging training,
-     * assessments or achievements/awards, which stay with coaches/sport admins.
-     */
+    /** Mirrors the server permission matrix — the API enforces it regardless. */
     can(permission) {
       if (!user) return false;
-      if (user.permissions.includes('*')) {
-        if (user.role === 'super_admin' && SUPER_ADMIN_DENIED.includes(permission)) return false;
-        return true;
-      }
-      return user.permissions.includes(permission);
+      return user.permissions.includes('*') || user.permissions.includes(permission);
     },
   }), [user, loading]);
 

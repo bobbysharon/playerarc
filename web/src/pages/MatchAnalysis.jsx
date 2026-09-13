@@ -211,7 +211,6 @@ function CricketAnalysis({ data }) {
             { key: 'dotPercent', label: 'Dot %', align: 'right', mono: true, render: (b) => `${b.dotPercent}%` },
             { key: 'strikeRate', label: 'SR', align: 'right', mono: true, render: (b) => b.strikeRate ?? '—' },
             { key: 'extras', label: 'Wd/Nb', align: 'right', mono: true, render: (b) => `${b.wides}/${b.noBalls}` },
-            { key: 'avgDeviation', label: 'Avg dev.', align: 'right', mono: true, render: (b) => (b.avgDeviation != null ? `${b.avgDeviation}°` : '—') },
           ]}
           rows={data.bowlingCard}
           empty={{ title: 'No bowling recorded', message: '' }}
@@ -405,12 +404,10 @@ function PitchMap({ points }) {
 
   const grid = LENGTHS.map((length) => LINES.map((line) => {
     const cell = points.filter((p) => p.length === length && p.line === line);
-    const devReadings = cell.map((p) => p.deviation).filter((d) => d != null);
     return {
       length, line, balls: cell.length,
       runs: cell.reduce((a, p) => a + p.runs, 0),
       wickets: cell.filter((p) => p.wicket).length,
-      avgDeviation: devReadings.length ? Math.round((devReadings.reduce((a, d) => a + d, 0) / devReadings.length) * 10) / 10 : null,
     };
   }));
   const maxRuns = Math.max(...grid.flat().map((c) => c.runs), 1);
@@ -437,7 +434,7 @@ function PitchMap({ points }) {
                         ? (cell.wickets ? 'rgba(244,63,94,0.35)' : `rgba(245,158,11,${0.12 + (cell.runs / maxRuns) * 0.6})`)
                         : 'transparent',
                     }}
-                    title={cell.balls ? `${cell.balls} balls, ${cell.runs} runs, ${cell.wickets} wickets${cell.avgDeviation != null ? `, avg deviation ${cell.avgDeviation}°` : ''}` : 'no balls here'}
+                    title={cell.balls ? `${cell.balls} balls, ${cell.runs} runs, ${cell.wickets} wickets` : 'no balls here'}
                   >
                     {cell.balls ? (
                       <span className="stat-value text-xs">{cell.runs}{cell.wickets ? <span className="text-alert"> ✕{cell.wickets}</span> : null}</span>
