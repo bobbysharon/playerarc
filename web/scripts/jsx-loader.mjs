@@ -20,7 +20,10 @@ export async function resolve(spec, context, next) {
 export async function load(url, context, next) {
   if (url.endsWith('.jsx') || (url.includes('/src/') && url.endsWith('.js'))) {
     const raw = readFileSync(fileURLToPath(url), 'utf8')
-      .replace(/import\.meta\.env/g, '({ VITE_DEMO_MODE: "true", VITE_BASE: "/" })');
+      // DEMO=false runs the pages against a live server instead of the
+      // in-browser demo, which is the combination a real deployment uses.
+      .replace(/import\.meta\.env/g,
+        `({ VITE_DEMO_MODE: "${process.env.DEMO === 'false' ? 'false' : 'true'}", VITE_BASE: "/" })`);
     const { code } = transformSync(raw, { loader: 'jsx', format: 'esm', jsx: 'automatic' });
     return { format: 'module', source: code, shortCircuit: true };
   }

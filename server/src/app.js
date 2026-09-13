@@ -33,6 +33,8 @@ app.use('/api', require('./routes/competitions'));      // /tournaments, /matche
 app.use('/api', require('./routes/match-events'));      // ball-by-ball capture and analysis
 app.use('/api', require('./routes/academy'));          // drills, session plans, benchmarks, announcements
 app.use('/api', require('./routes/tracking'));         // ball tracking, fitness, templates, selection
+app.use('/api', require('./routes/athlete'));          // athlete portal — separate credentials, own record only
+app.use('/api', require('./routes/booking'));          // grounds, coaches and bookings — mostly public
 app.use('/api/training', require('./routes/training'));
 app.use('/api/assessments', require('./routes/assessments'));
 app.use('/api/achievements', require('./routes/achievements'));

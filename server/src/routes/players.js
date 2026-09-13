@@ -326,21 +326,24 @@ router.post('/', requirePermission('players.write'), asyncHandler(async (req, re
   const body = playerSchema.parse(req.body);
   if (body.dob && new Date(body.dob) > new Date()) throw new ApiError(422, 'Date of birth cannot be in the future.');
 
-  const duplicate = db
-    .prepare(`SELECT athlete_id FROM players WHERE lower(first_name) = lower(?) AND lower(last_name) = lower(?) AND ifnull(dob,'') = ?`)
-    .get(body.first_name, body.last_name, body.dob || '');
-  if (duplicate) {
-    throw new ApiError(409, `${body.first_name} ${body.last_name} is already registered as ${duplicate.athlete_id}. Add the new sport to that record instead of creating a second one.`);
-  }
+  // Name and date of birth are the identity; email and phone catch the case
+  // where a guardian's contact is reused and the date of birth was mistyped.
+  assertNotDuplicate(body);
 
   const athleteId = nextAthleteId();
-  const values = COLUMNS.map((c) => (body[c] === '' ? null : body[c] ?? null));
+  // A registration happens now unless a date is given, rather than failing on
+  // a not-null column the form does not always fill in.
+  const registration = body.registration_date || new Date().toISOString().slice(0, 10);
+  const values = COLUMNS.map((c) => {
+    if (c === 'registration_date') return registration;
+    return body[c] === '' ? null : body[c] ?? null;
+  });
   const info = db
     .prepare(`INSERT INTO players (athlete_id, ${COLUMNS.join(', ')}, created_by) VALUES (?, ${COLUMNS.map(() => '?').join(', ')}, ?)`)
     .run(athleteId, ...values, req.user.id);
 
   const id = info.lastInsertRowid;
-  const registrationDate = body.registration_date || new Date().toISOString().slice(0, 10);
+  const registrationDate = registration;
   db.prepare('INSERT INTO player_status_history (player_id, status, effective_from, reason, changed_by) VALUES (?,?,?,?,?)')
     .run(id, body.status, registrationDate, 'Initial registration', req.user.id);
   timeline.addEvent({
@@ -657,5 +660,60 @@ router.get('/showcase/:token', asyncHandler(async (req, res) => {
     milestones,
   });
 }));
+
+
+/**
+ * Refuse a registration that is really an athlete the club already has.
+ *
+ * The identity is the athlete's own name and date of birth — that pair is
+ * unique in the database. Email and phone are checked as well, because a
+ * guardian's contact is often shared between siblings: a matching email alone
+ * proves nothing, but the same name on the same contact almost always means
+ * the record is being entered twice.
+ *
+ * Any match is reported with the existing athlete ID, so whoever is entering
+ * it can go and find the record rather than working around the error.
+ */
+function assertNotDuplicate({ first_name: first, last_name: last, dob, email, phone }, excludeId = null) {
+  const exclude = excludeId ? 'AND id != ?' : '';
+  const args = (extra) => (excludeId ? [...extra, excludeId] : extra);
+
+  const sameIdentity = db
+    .prepare(`SELECT athlete_id, first_name, last_name FROM players
+              WHERE lower(first_name) = lower(?) AND lower(last_name) = lower(?)
+              AND ifnull(dob,'') = ifnull(?,'') ${exclude} LIMIT 1`)
+    .get(...args([first, last, dob ?? null]));
+  if (sameIdentity) {
+    throw new ApiError(409,
+      `${sameIdentity.first_name} ${sameIdentity.last_name} is already registered as ${sameIdentity.athlete_id}. Open that record rather than creating a second one.`);
+  }
+
+  if (email) {
+    const sameNameAndEmail = db
+      .prepare(`SELECT athlete_id, first_name, last_name, dob FROM players
+                WHERE lower(email) = lower(?) AND lower(first_name) = lower(?) AND lower(last_name) = lower(?)
+                ${exclude} LIMIT 1`)
+      .get(...args([email, first, last]));
+    if (sameNameAndEmail) {
+      throw new ApiError(409,
+        `${sameNameAndEmail.first_name} ${sameNameAndEmail.last_name} is already registered as ${sameNameAndEmail.athlete_id} on that email address${sameNameAndEmail.dob ? ` with a date of birth of ${sameNameAndEmail.dob}` : ''}. Check the date of birth before registering again.`);
+    }
+  }
+
+  if (phone) {
+    const digits = String(phone).replace(/\D/g, '');
+    if (digits.length >= 7) {
+      const sameNameAndPhone = db
+        .prepare(`SELECT athlete_id, first_name, last_name FROM players
+                  WHERE replace(replace(replace(ifnull(phone,''),' ',''),'-',''),'+','') LIKE ?
+                  AND lower(first_name) = lower(?) AND lower(last_name) = lower(?) ${exclude} LIMIT 1`)
+        .get(...args([`%${digits.slice(-9)}`, first, last]));
+      if (sameNameAndPhone) {
+        throw new ApiError(409,
+          `${sameNameAndPhone.first_name} ${sameNameAndPhone.last_name} is already registered as ${sameNameAndPhone.athlete_id} on that phone number.`);
+      }
+    }
+  }
+}
 
 module.exports = router;

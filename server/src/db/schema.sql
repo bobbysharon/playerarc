@@ -1067,3 +1067,145 @@ CREATE TABLE IF NOT EXISTS assessment_template_criteria (
   weight      REAL NOT NULL DEFAULT 1,
   UNIQUE (template_id, criteria_id)
 );
+
+-- =====================================================================
+-- 15. ATHLETE PORTAL LOGINS
+--
+-- Deliberately separate from `users`.
+--
+-- A staff account carries a role, scopes and permissions. An athlete
+-- login carries none of those: there is no role column here, so an
+-- athlete credential cannot be escalated into a coach or an
+-- administrator, because there is no field to change. Its capability is
+-- fixed by the shape of the table — view your own record, nothing else.
+--
+-- One row per athlete, enforced by a unique key on player_id, so the
+-- club cannot end up with two logins for the same person. The login is
+-- always attached to an athlete who already exists; it never creates one.
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS athlete_logins (
+  id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+  player_id            INTEGER NOT NULL UNIQUE REFERENCES players(id) ON DELETE CASCADE,
+  email                TEXT NOT NULL UNIQUE,
+  password_hash        TEXT NOT NULL,
+  status               TEXT NOT NULL DEFAULT 'active'
+                       CHECK (status IN ('active','suspended','invited')),
+  must_change_password INTEGER NOT NULL DEFAULT 1,
+  last_login_at        TEXT,
+  is_demo              INTEGER NOT NULL DEFAULT 0,
+  created_by           INTEGER REFERENCES users(id),
+  created_at           TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at           TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_athlete_logins ON athlete_logins(email);
+
+-- =====================================================================
+-- 16. GROUNDS AND BOOKINGS
+--
+-- Venues were free text on matches and training sessions, which meant
+-- nothing in the platform knew whether a ground was in use. A booking
+-- system cannot be built on that, so grounds become records and the
+-- existing text is matched onto them.
+-- =====================================================================
+
+CREATE TABLE IF NOT EXISTS facilities (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  name           TEXT NOT NULL UNIQUE,
+  kind           TEXT NOT NULL DEFAULT 'ground'
+                 CHECK (kind IN ('ground','net','court','hall','gym','pool','track')),
+  description    TEXT,
+  surface        TEXT,
+  capacity       INTEGER,
+  -- Grounds open and close; a booking outside those hours is refused
+  -- rather than quietly accepted and sorted out later.
+  opens_at       TEXT NOT NULL DEFAULT '06:00',
+  closes_at      TEXT NOT NULL DEFAULT '22:00',
+  slot_minutes   INTEGER NOT NULL DEFAULT 60,
+  hourly_rate    REAL,
+  currency       TEXT NOT NULL DEFAULT 'AED',
+  location_note  TEXT,
+  photo_url      TEXT,
+  is_bookable    INTEGER NOT NULL DEFAULT 1,
+  is_active      INTEGER NOT NULL DEFAULT 1,
+  is_demo        INTEGER NOT NULL DEFAULT 0,
+  created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at     TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Which sports a ground suits. A cricket square is not a badminton court.
+CREATE TABLE IF NOT EXISTS facility_sports (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  facility_id INTEGER NOT NULL REFERENCES facilities(id) ON DELETE CASCADE,
+  sport_id    INTEGER NOT NULL REFERENCES sports(id) ON DELETE CASCADE,
+  UNIQUE (facility_id, sport_id)
+);
+
+-- What a coach is actually known for, and for how long. Used to show
+-- coaches as cards when booking rather than as a list of names.
+CREATE TABLE IF NOT EXISTS coach_specialities (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  coach_id       INTEGER NOT NULL REFERENCES coaches(id) ON DELETE CASCADE,
+  sport_id       INTEGER REFERENCES sports(id) ON DELETE CASCADE,
+  speciality     TEXT NOT NULL,
+  years_experience REAL NOT NULL DEFAULT 0,
+  is_primary     INTEGER NOT NULL DEFAULT 0,
+  bookable       INTEGER NOT NULL DEFAULT 1,
+  hourly_rate    REAL,
+  bio            TEXT,
+  is_demo        INTEGER NOT NULL DEFAULT 0,
+  created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (coach_id, speciality)
+);
+CREATE INDEX IF NOT EXISTS idx_coach_spec ON coach_specialities(sport_id, bookable);
+
+-- ---------------------------------------------------------------------
+-- A booking.
+--
+-- Guest bookings carry no athlete details on purpose: a name and a
+-- contact are enough to hold a slot, and asking for more would be
+-- collecting information the club has no use for.
+--
+-- `slot_key` exists so the database itself can refuse a double booking.
+-- An application-level check loses that race under concurrent requests;
+-- a unique index does not.
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS bookings (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  reference      TEXT NOT NULL UNIQUE,
+  facility_id    INTEGER NOT NULL REFERENCES facilities(id) ON DELETE CASCADE,
+  sport_id       INTEGER REFERENCES sports(id) ON DELETE SET NULL,
+  coach_id       INTEGER REFERENCES coaches(id) ON DELETE SET NULL,
+
+  booking_date   TEXT NOT NULL,
+  start_time     TEXT NOT NULL,
+  end_time       TEXT NOT NULL,
+  -- Minute of the day, so overlap is arithmetic rather than string work.
+  start_minute   INTEGER NOT NULL,
+  end_minute     INTEGER NOT NULL,
+
+  booked_by      TEXT NOT NULL DEFAULT 'guest'
+                 CHECK (booked_by IN ('guest','athlete','staff')),
+  player_id      INTEGER REFERENCES players(id) ON DELETE SET NULL,
+  created_by     INTEGER REFERENCES users(id),
+
+  -- Enough to reach whoever booked, and nothing more.
+  contact_name   TEXT NOT NULL,
+  contact_phone  TEXT,
+  contact_email  TEXT,
+  party_size     INTEGER,
+  notes          TEXT,
+
+  status         TEXT NOT NULL DEFAULT 'confirmed'
+                 CHECK (status IN ('confirmed','cancelled','completed','no_show')),
+  cancelled_at   TEXT,
+  cancel_reason  TEXT,
+  amount         REAL,
+  currency       TEXT NOT NULL DEFAULT 'AED',
+  is_demo        INTEGER NOT NULL DEFAULT 0,
+  created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at     TEXT NOT NULL DEFAULT (datetime('now')),
+
+  CHECK (end_minute > start_minute)
+);
+CREATE INDEX IF NOT EXISTS idx_bookings_slot ON bookings(facility_id, booking_date, start_minute);
+CREATE INDEX IF NOT EXISTS idx_bookings_coach ON bookings(coach_id, booking_date);

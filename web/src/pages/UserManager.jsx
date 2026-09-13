@@ -6,7 +6,7 @@ import {
 import { api, DEMO_MODE } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import {
-  PageHeader, Section, Spinner, ErrorNote, DataTable, Modal, Field, Chip, StatTile, Tabs,
+  PageHeader, Section, Spinner, ErrorNote, DataTable, Modal, Field, Chip, StatTile, Tabs, Avatar,
 } from '../components/ui';
 import { formatDateTime, titleCase } from '../lib/format';
 
@@ -22,10 +22,12 @@ export default function UserManager() {
   const [passwordFor, setPasswordFor] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [tab, setTab] = useState('accounts');
+  const [athleteLogins, setAthleteLogins] = useState(null);
 
   const load = useCallback(() => {
     setError(null);
     api.get('/admin/users').then(setData).catch(setError);
+    api.get('/admin/athlete-logins').then(setAthleteLogins).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -76,12 +78,14 @@ export default function UserManager() {
         tabs={[
           { key: 'accounts', label: 'Accounts', count: data.users.length },
           { key: 'roles', label: 'Roles & permissions', count: data.roles.length },
+          { key: 'athletes', label: 'Athlete logins', count: athleteLogins?.total },
         ]}
         active={tab}
         onChange={setTab}
       />
 
       <div className="mt-5">
+        {tab === 'athletes' && <AthleteLogins data={athleteLogins} onChanged={load} />}
         {tab === 'accounts' && (
           <Section>
             <DataTable
@@ -612,6 +616,437 @@ function DeleteDialog({ user, onClose, onSaved }) {
             <button type="button" className="btn-danger" onClick={remove} disabled={busy}>
               {busy ? 'Deleting…' : 'Delete account'}
             </button>
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Athlete portal logins                                               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Athlete logins are deliberately not staff accounts. They live in their own
+ * table with no role attached, so one cannot be promoted into a coach or an
+ * administrator — there is no field to change. Each opens exactly one thing:
+ * that athlete's own record.
+ */
+function AthleteLogins({ data, onChanged }) {
+  const [creating, setCreating] = useState(false);
+  const [passwordFor, setPasswordFor] = useState(null);
+  const [editing, setEditing] = useState(null);
+  const [removing, setRemoving] = useState(null);
+  const [query, setQuery] = useState('');
+
+  if (!data) return <Spinner label="Loading athlete logins" />;
+
+  const rows = query
+    ? data.logins.filter((l) => [l.first_name, l.last_name, l.athlete_id, l.email]
+      .some((v) => String(v || '').toLowerCase().includes(query.toLowerCase())))
+    : data.logins;
+
+  return (
+    <div className="space-y-5">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <StatTile label="Athlete logins" value={data.total} tone="gold" icon={KeyRound} />
+        <StatTile label="Active" value={data.logins.filter((l) => l.status === 'active').length} tone="pitch" />
+        <StatTile label="Suspended" value={data.logins.filter((l) => l.status !== 'active').length} tone="alert" />
+        <StatTile label="Without a login" value={data.athletesWithoutLogin.length} tone="ink" />
+      </div>
+
+      <div className="rounded-lg border border-line bg-white/[0.02] px-4 py-3">
+        <p className="text-sm text-ink-600">
+          These are kept apart from staff accounts on purpose. An athlete login carries no role, so it
+          cannot be turned into a coach or an administrator, and it opens nothing but that athlete's own
+          record — not the roster, not another athlete.
+        </p>
+        <p className="text-xs text-ink-400 mt-1.5">
+          One login per athlete, enforced by the database. Issuing one never creates a new athlete record.
+        </p>
+      </div>
+
+      <Section
+        title="Athlete logins"
+        subtitle={`${rows.length} shown`}
+        actions={
+          <>
+            <input
+              className="input py-1.5 text-xs w-48"
+              placeholder="Search name, ID or email"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+            <button type="button" className="btn-gold" onClick={() => setCreating(true)}>
+              <UserPlus size={15} /> Issue login
+            </button>
+          </>
+        }
+      >
+        <DataTable
+          columns={[
+            {
+              key: 'athlete', label: 'Athlete',
+              render: (l) => (
+                <span className="flex items-center gap-2.5">
+                  <Avatar player={l} size={30} />
+                  <span className="min-w-0">
+                    <Link to={`/players/${l.player_id}`} className="link block truncate">
+                      {l.display_name || `${l.first_name} ${l.last_name}`}
+                    </Link>
+                    <span className="font-mono text-[11px] text-ink-400">{l.athlete_id}</span>
+                  </span>
+                </span>
+              ),
+            },
+            { key: 'email', label: 'Sign-in email', mono: true },
+            {
+              key: 'status', label: 'Status',
+              render: (l) => <Chip tone={l.status === 'active' ? 'active' : l.status === 'suspended' ? 'absent' : 'trial'}>{titleCase(l.status)}</Chip>,
+            },
+            {
+              key: 'must_change_password', label: 'Password',
+              render: (l) => (l.must_change_password
+                ? <span className="text-gold text-xs">Change at next sign-in</span>
+                : <span className="text-ink-400 text-xs">Set by the athlete</span>),
+            },
+            {
+              key: 'last_login_at', label: 'Last sign-in',
+              render: (l) => (l.last_login_at ? formatDateTime(l.last_login_at) : <span className="text-ink-200">Never</span>),
+            },
+            {
+              key: 'actions', label: '', align: 'right',
+              render: (l) => (
+                <span className="flex justify-end gap-1">
+                  <button type="button" className="btn-quiet px-2 py-1" title="Edit email or status" onClick={() => setEditing(l)}>
+                    <Pencil size={14} />
+                  </button>
+                  <button type="button" className="btn-quiet px-2 py-1" title="Set or reset password" onClick={() => setPasswordFor(l)}>
+                    <KeyRound size={14} />
+                  </button>
+                  <button type="button" className="btn-quiet px-2 py-1 hover:text-alert" title="Remove the login" onClick={() => setRemoving(l)}>
+                    <Trash2 size={14} />
+                  </button>
+                </span>
+              ),
+            },
+          ]}
+          rows={rows}
+          empty={{
+            title: query ? 'No athlete matches that search' : 'No athlete logins yet',
+            message: query ? 'Clear the search to see the rest.' : 'Issue one and that athlete can sign in to view their own record.',
+            action: query ? null : <button type="button" className="btn-gold" onClick={() => setCreating(true)}>Issue login</button>,
+          }}
+        />
+      </Section>
+
+      <IssueAthleteLogin open={creating} onClose={() => setCreating(false)} candidates={data.athletesWithoutLogin} onSaved={onChanged} />
+      <AthletePassword login={passwordFor} onClose={() => setPasswordFor(null)} onSaved={onChanged} />
+      <EditAthleteLogin login={editing} onClose={() => setEditing(null)} onSaved={onChanged} />
+      <RemoveAthleteLogin login={removing} onClose={() => setRemoving(null)} onSaved={onChanged} />
+    </div>
+  );
+}
+
+function IssueAthleteLogin({ open, onClose, candidates, onSaved }) {
+  const [form, setForm] = useState({ player_id: '', email: '', password: '', mustChange: true });
+  const [query, setQuery] = useState('');
+  const [result, setResult] = useState(null);
+  const [copied, setCopied] = useState(false);
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setForm({ player_id: '', email: '', password: '', mustChange: true });
+      setQuery(''); setResult(null); setCopied(false); setError(null);
+    }
+  }, [open]);
+
+  const matched = candidates.filter((p) => {
+    if (!query) return false;
+    const q = query.toLowerCase();
+    return [p.first_name, p.last_name, p.display_name, p.athlete_id].some((v) => String(v || '').toLowerCase().includes(q));
+  }).slice(0, 10);
+  const chosen = candidates.find((p) => String(p.id) === String(form.player_id));
+
+  const blocking = !form.player_id ? 'Choose the athlete this login is for.'
+    : !form.email.trim() ? 'Enter the email they will sign in with.' : null;
+
+  async function submit(e) {
+    e.preventDefault();
+    if (blocking) { setError({ message: blocking }); return; }
+    setBusy(true); setError(null);
+    try {
+      const r = await api.post('/admin/athlete-logins', {
+        player_id: Number(form.player_id),
+        email: form.email.trim(),
+        password: form.password || undefined,
+        mustChange: form.mustChange,
+      });
+      setResult(r);
+      onSaved();
+    } catch (err) { setError(err); } finally { setBusy(false); }
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title="Issue an athlete login">
+      {result ? (
+        <div className="space-y-4">
+          <div className="rounded-lg border border-pitch/30 bg-pitch/10 px-4 py-3">
+            <p className="text-sm font-semibold text-pitch">Login created.</p>
+            <p className="text-xs text-pitch/80 mt-1">
+              {result.mustChange
+                ? 'They will be asked to choose their own password the first time they sign in.'
+                : 'They can sign in with this straight away.'}
+            </p>
+          </div>
+          <div>
+            <p className="label mb-1.5">Hand this over now — it is not shown again</p>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 rounded-lg border border-gold/40 bg-gold/10 px-3 py-2.5 font-mono text-sm text-gold break-all">
+                {result.password}
+              </code>
+              <button type="button" className="btn-ghost shrink-0"
+                onClick={() => navigator.clipboard?.writeText(result.password).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); })}>
+                {copied ? <><Check size={14} /> Copied</> : <><Copy size={14} /> Copy</>}
+              </button>
+            </div>
+            <p className="text-xs text-ink-400 mt-2">Only a hash is stored, so nobody can read it back afterwards.</p>
+          </div>
+          <div className="flex justify-end">
+            <button type="button" className="btn-gold" onClick={onClose}>Done</button>
+          </div>
+        </div>
+      ) : (
+        <form onSubmit={submit} className="space-y-3">
+          <p className="text-sm text-ink-400">
+            The login attaches to an athlete who already exists. It never creates a new athlete record, and
+            an athlete can only ever have one.
+          </p>
+
+          {chosen ? (
+            <Field label="Athlete">
+              <div className="flex items-center gap-2.5 rounded-lg border border-pitch/40 bg-pitch/10 px-3 py-2">
+                <span className="min-w-0">
+                  <span className="text-sm block truncate">{chosen.display_name || `${chosen.first_name} ${chosen.last_name}`}</span>
+                  <span className="font-mono text-[11px] text-ink-400">{chosen.athlete_id}</span>
+                </span>
+                <button type="button" className="btn-quiet text-xs ml-auto shrink-0"
+                  onClick={() => { setForm({ ...form, player_id: '' }); setQuery(''); }}>
+                  Change
+                </button>
+              </div>
+            </Field>
+          ) : (
+            <Field label="Athlete" hint="Only athletes without a login are listed">
+              <input className="input mb-2" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search by name or athlete ID" />
+              <ul className="border border-line rounded-lg max-h-40 overflow-y-auto scroll-thin divide-y divide-line">
+                {matched.map((p) => (
+                  <li key={p.id}>
+                    <button type="button" className="w-full text-left px-3 py-2 hover:bg-white/[0.04] flex items-center gap-2"
+                      onClick={() => setForm({
+                        ...form,
+                        player_id: p.id,
+                        email: form.email || `${p.first_name}.${p.last_name}`.toLowerCase().replace(/[^a-z.]/g, '') + '@athlete.playerarc.local',
+                      })}>
+                      <span className="text-sm">{p.display_name || `${p.first_name} ${p.last_name}`}</span>
+                      <span className="font-mono text-[11px] text-ink-400 ml-auto">{p.athlete_id}</span>
+                    </button>
+                  </li>
+                ))}
+                {!matched.length && (
+                  <li className="px-3 py-6 text-sm text-ink-400 text-center">
+                    {query ? `No athlete without a login matches “${query}”.` : 'Search to find an athlete.'}
+                  </li>
+                )}
+              </ul>
+            </Field>
+          )}
+
+          <Field label="Sign-in email" hint="Must not match a staff account">
+            <input className="input" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+          </Field>
+          <Field label="Password" hint="Leave empty and a strong one is generated">
+            <input className="input" type="text" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} autoComplete="new-password" />
+          </Field>
+
+          <label className="flex items-start gap-2.5 text-sm text-ink-600">
+            <input type="checkbox" className="mt-0.5" checked={form.mustChange} onChange={(e) => setForm({ ...form, mustChange: e.target.checked })} />
+            <span>
+              Require a change at first sign-in
+              <span className="block text-xs text-ink-400">Recommended — the password you hand over stops working once they set their own.</span>
+            </span>
+          </label>
+
+          <ErrorNote error={error} />
+          {blocking && <p className="text-xs text-gold text-right">{blocking}</p>}
+          <div className="flex justify-end gap-2 pt-1">
+            <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
+            <button type="submit" className="btn-gold" disabled={busy || !!blocking}>{busy ? 'Creating…' : 'Issue login'}</button>
+          </div>
+        </form>
+      )}
+    </Modal>
+  );
+}
+
+function AthletePassword({ login, onClose, onSaved }) {
+  const [mode, setMode] = useState('generate');
+  const [password, setPassword] = useState('');
+  const [mustChange, setMustChange] = useState(true);
+  const [result, setResult] = useState(null);
+  const [copied, setCopied] = useState(false);
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (login) { setMode('generate'); setPassword(''); setMustChange(true); setResult(null); setCopied(false); setError(null); }
+  }, [login]);
+
+  async function submit(e) {
+    e.preventDefault();
+    if (mode === 'set' && password.length < 8) { setError({ message: 'Use at least 8 characters.' }); return; }
+    setBusy(true); setError(null);
+    try {
+      const r = await api.post(`/admin/athlete-logins/${login.id}/password`, {
+        ...(mode === 'set' ? { password } : {}),
+        mustChange,
+      });
+      setResult(r);
+      onSaved();
+    } catch (err) { setError(err); } finally { setBusy(false); }
+  }
+
+  return (
+    <Modal open={!!login} onClose={onClose} title={login ? `Password — ${login.first_name} ${login.last_name}` : ''}>
+      {!login ? null : result ? (
+        <div className="space-y-4">
+          <div className="rounded-lg border border-pitch/30 bg-pitch/10 px-4 py-3">
+            <p className="text-sm font-semibold text-pitch">Password updated.</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <code className="flex-1 rounded-lg border border-gold/40 bg-gold/10 px-3 py-2.5 font-mono text-sm text-gold break-all">{result.password}</code>
+            <button type="button" className="btn-ghost shrink-0"
+              onClick={() => navigator.clipboard?.writeText(result.password).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); })}>
+              {copied ? <><Check size={14} /> Copied</> : <><Copy size={14} /> Copy</>}
+            </button>
+          </div>
+          <p className="text-xs text-ink-400">Not shown again — only a hash is kept.</p>
+          <div className="flex justify-end"><button type="button" className="btn-gold" onClick={onClose}>Done</button></div>
+        </div>
+      ) : (
+        <form onSubmit={submit} className="space-y-4">
+          <div className="rounded-lg border border-line bg-white/[0.03] px-3.5 py-3 text-xs text-ink-400">
+            <p className="font-semibold text-ink-600 mb-1">An existing password cannot be displayed.</p>
+            <p>It is stored as a one-way hash, the same as a staff account. You can issue a new one.</p>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <button type="button" onClick={() => setMode('generate')}
+              className={`rounded-lg border px-3 py-2.5 text-left ${mode === 'generate' ? 'border-gold/60 bg-gold/10' : 'border-line'}`}>
+              <span className="flex items-center gap-1.5 text-sm font-semibold text-ink"><Sparkles size={14} /> Generate</span>
+              <span className="text-[11px] text-ink-400 block mt-0.5">Shown once</span>
+            </button>
+            <button type="button" onClick={() => setMode('set')}
+              className={`rounded-lg border px-3 py-2.5 text-left ${mode === 'set' ? 'border-gold/60 bg-gold/10' : 'border-line'}`}>
+              <span className="flex items-center gap-1.5 text-sm font-semibold text-ink"><KeyRound size={14} /> Set my own</span>
+              <span className="text-[11px] text-ink-400 block mt-0.5">Type it yourself</span>
+            </button>
+          </div>
+          {mode === 'set' && (
+            <Field label="New password" hint="At least 8 characters">
+              <input className="input" type="text" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" />
+            </Field>
+          )}
+          <label className="flex items-start gap-2.5 text-sm text-ink-600">
+            <input type="checkbox" className="mt-0.5" checked={mustChange} onChange={(e) => setMustChange(e.target.checked)} />
+            <span>Require a change at next sign-in</span>
+          </label>
+          <ErrorNote error={error} />
+          <div className="flex justify-end gap-2">
+            <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
+            <button type="submit" className="btn-gold" disabled={busy}>{busy ? 'Working…' : mode === 'generate' ? 'Generate password' : 'Set password'}</button>
+          </div>
+        </form>
+      )}
+    </Modal>
+  );
+}
+
+function EditAthleteLogin({ login, onClose, onSaved }) {
+  const [form, setForm] = useState({ email: '', status: 'active' });
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (login) { setForm({ email: login.email, status: login.status }); setError(null); }
+  }, [login]);
+
+  async function submit(e) {
+    e.preventDefault();
+    setBusy(true); setError(null);
+    try {
+      await api.put(`/admin/athlete-logins/${login.id}`, form);
+      onSaved(); onClose();
+    } catch (err) { setError(err); } finally { setBusy(false); }
+  }
+
+  return (
+    <Modal open={!!login} onClose={onClose} title={login ? `Edit — ${login.first_name} ${login.last_name}` : ''}>
+      {login && (
+        <form onSubmit={submit} className="space-y-3">
+          <p className="text-sm text-ink-400">
+            An athlete login has no role to change. Only the sign-in address and whether it is active can be
+            edited here; their athlete record is edited from their profile.
+          </p>
+          <Field label="Sign-in email">
+            <input className="input" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+          </Field>
+          <Field label="Status" hint="Suspending blocks sign-in and leaves the athlete record untouched">
+            <select className="input" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
+              {['active', 'suspended', 'invited'].map((x) => <option key={x} value={x}>{titleCase(x)}</option>)}
+            </select>
+          </Field>
+          <ErrorNote error={error} />
+          <div className="flex justify-end gap-2 pt-1">
+            <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
+            <button type="submit" className="btn-gold" disabled={busy}>{busy ? 'Saving…' : 'Save changes'}</button>
+          </div>
+        </form>
+      )}
+    </Modal>
+  );
+}
+
+function RemoveAthleteLogin({ login, onClose, onSaved }) {
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { setError(null); }, [login]);
+
+  async function remove() {
+    setBusy(true); setError(null);
+    try {
+      await api.del(`/admin/athlete-logins/${login.id}`);
+      onSaved(); onClose();
+    } catch (err) { setError(err); } finally { setBusy(false); }
+  }
+
+  return (
+    <Modal open={!!login} onClose={onClose} title={login ? `Remove login for ${login.first_name} ${login.last_name}?` : ''}>
+      {login && (
+        <div className="space-y-4">
+          <p className="text-sm text-ink-600">
+            This removes their way of signing in. Their athlete record, statistics and history are untouched —
+            only the portal access goes.
+          </p>
+          <p className="text-sm text-ink-400">
+            If they are only away for a while, set the login to <strong className="text-ink">suspended</strong> instead.
+          </p>
+          <ErrorNote error={error} />
+          <div className="flex justify-end gap-2">
+            <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
+            <button type="button" className="btn-danger" onClick={remove} disabled={busy}>{busy ? 'Removing…' : 'Remove login'}</button>
           </div>
         </div>
       )}

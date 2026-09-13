@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { useAuth } from './lib/auth';
 import { AppShell, Spinner } from './components/ui';
+import PageErrorBoundary from './components/PageErrorBoundary';
 
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
@@ -27,6 +28,7 @@ import Drills from './pages/Drills';
 import Tracking from './pages/Tracking';
 import Announcements from './pages/Announcements';
 import Showcase from './pages/Showcase';
+import GuestBooking from './pages/GuestBooking';
 import UserManager from './pages/UserManager';
 import ChangePassword from './pages/ChangePassword';
 
@@ -37,7 +39,13 @@ function Protected({ children }) {
   if (!user) return <Navigate to="/login" state={{ from: location }} replace />;
   // An administrator issued this password and asked for it to be replaced.
   if (user.mustChangePassword) return <ChangePassword />;
-  return <AppShell>{children}</AppShell>;
+  // The boundary sits inside the shell, so a page that fails to render leaves
+  // the navigation intact and the person is never stranded on a blank screen.
+  return (
+    <AppShell>
+      <PageErrorBoundary routeKey={location.pathname}>{children}</PageErrorBoundary>
+    </AppShell>
+  );
 }
 
 export default function App() {
@@ -46,6 +54,8 @@ export default function App() {
       <Route path="/login" element={<Login />} />
       {/* Public: the link is the credential, so no sign-in and no shell. */}
       <Route path="/showcase/:token" element={<Showcase />} />
+      {/* Booking needs no account, so it sits outside the signed-in shell. */}
+      <Route path="/book" element={<GuestBooking />} />
       <Route path="/" element={<Protected><Dashboard /></Protected>} />
       <Route path="/players" element={<Protected><Players /></Protected>} />
       <Route path="/players/:id" element={<Protected><PlayerProfile /></Protected>} />

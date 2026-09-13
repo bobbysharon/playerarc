@@ -11,6 +11,10 @@ function authenticate(req, res, next) {
   if (!token) return next();
   try {
     const payload = jwt.verify(token, config.jwtSecret);
+    // Athlete portal tokens carry a different audience and are never valid
+    // here. Without this check an athlete credential would be accepted by
+    // every staff route whose id happened to match a user.
+    if (payload.aud === 'athlete') return next();
     const row = db
       .prepare(`SELECT u.id, u.email, u.full_name, u.status, u.avatar_url, r.key AS role, r.name AS role_name
                 FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = ?`)

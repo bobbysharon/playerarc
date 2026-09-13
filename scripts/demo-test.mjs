@@ -388,6 +388,44 @@ await t('selection compares on shared measures', async()=>{
   return r.rows.length>=2 && r.columns.length>0;
 });
 
+// athlete portal logins, kept apart from staff accounts
+await t('athlete logins listed apart from staff', async()=>{
+  const r=await demoRequest('GET','/admin/athlete-logins');
+  return r.logins.length>0 && r.athletesWithoutLogin.length>0 && r.logins.every(l=>!('role' in l));
+});
+await t('one login per athlete', async()=>{
+  const r=await demoRequest('GET','/admin/athlete-logins');
+  try{await demoRequest('POST','/admin/athlete-logins',{player_id:r.logins[0].player_id,email:'dupe'+Date.now()+'@athlete.playerarc.local'});return false;}
+  catch(e){return e.status===409;}
+});
+await t('athlete cannot reuse a staff address', async()=>{
+  const r=await demoRequest('GET','/admin/athlete-logins');
+  try{await demoRequest('POST','/admin/athlete-logins',{player_id:r.athletesWithoutLogin[0].id,email:'admin@playerarc.local'});return false;}
+  catch(e){return e.status===409;}
+});
+await t('issuing a login creates no athlete', async()=>{
+  const before=(await demoRequest('GET','/players?pageSize=1')).total;
+  const r=await demoRequest('GET','/admin/athlete-logins');
+  const made=await demoRequest('POST','/admin/athlete-logins',{player_id:r.athletesWithoutLogin[0].id,email:'issued'+Date.now()+'@athlete.playerarc.local'});
+  const after=(await demoRequest('GET','/players?pageSize=1')).total;
+  return !!made.password && before===after;
+});
+await t('removing a login leaves the athlete', async()=>{
+  const r=await demoRequest('GET','/admin/athlete-logins');
+  const made=await demoRequest('POST','/admin/athlete-logins',{player_id:r.athletesWithoutLogin[0].id,email:'temp'+Date.now()+'@athlete.playerarc.local'});
+  const before=(await demoRequest('GET','/players?pageSize=1')).total;
+  await demoRequest('DELETE',`/admin/athlete-logins/${made.id}`);
+  const after=(await demoRequest('GET','/players?pageSize=1')).total;
+  return before===after;
+});
+await t('only the administrator manages athlete logins', async()=>{
+  await demoRequest('POST','/auth/login',{email:'coach.cricket@karwansportsclub.com',password:'Karwan@2026'});
+  let blocked=false;
+  try{await demoRequest('GET','/admin/athlete-logins');}catch(e){blocked=e.status===403;}
+  await demoRequest('POST','/auth/login',{email:'admin@playerarc.local',password:'Karwan@2026'});
+  return blocked;
+});
+
 // scoping
 await demoRequest('POST','/auth/login',{email:'coach.cricket@karwansportsclub.com',password:'Karwan@2026'});
 await t('coach scoped athlete list', async()=>{const r=await demoRequest('GET','/players?pageSize=100');return r.total>0&&r.total<46;});

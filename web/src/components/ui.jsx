@@ -154,31 +154,62 @@ export function Section({ title, subtitle, actions, children, className = '' }) 
   );
 }
 
+/**
+ * A dialog that always scrolls.
+ *
+ * Two things have to be right or a long form becomes unusable. The panel is a
+ * flex column, so its scrolling body needs `min-h-0` — without it the body
+ * grows to fit its content, the panel clips it, and nothing scrolls at all;
+ * the submit button simply sits below the fold with no way to reach it.
+ *
+ * And the backdrop scrolls too. On a short screen — a phone in landscape, a
+ * laptop with the browser chrome open — even a capped panel can be taller than
+ * the viewport, so the outer layer scrolls as a fallback rather than trapping
+ * the dialog off-screen.
+ */
 export function Modal({ open, onClose, title, children, wide = false }) {
   useEffect(() => {
     if (!open) return undefined;
     const onKey = (e) => e.key === 'Escape' && onClose();
     document.addEventListener('keydown', onKey);
+    // The page behind must not scroll, or a touch drag moves the wrong thing.
+    const previous = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => {
       document.removeEventListener('keydown', onKey);
-      document.body.style.overflow = '';
+      document.body.style.overflow = previous;
     };
   }, [open, onClose]);
 
   if (!open) return null;
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6">
+    <div className="fixed inset-0 z-50 overflow-y-auto overscroll-contain">
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
-      <div className={`relative bg-surface border border-line rounded-xl shadow-lift w-full ${wide ? 'max-w-4xl' : 'max-w-lg'} max-h-[90vh] flex flex-col animate-fade-up`}>
-        <header className="flex items-center justify-between px-5 py-3.5 border-b border-line bg-white/[0.02]">
-          <h2 className="font-display text-xl flex items-center gap-2.5">
-            <span className="h-4 w-1 rounded-full bg-gold-grad" />
-            {title}
-          </h2>
-          <button type="button" onClick={onClose} className="btn-quiet px-2 py-1" aria-label="Close">✕</button>
-        </header>
-        <div className="overflow-y-auto scroll-thin px-5 py-4">{children}</div>
+
+      {/* min-h-full keeps the dialog centred on a tall screen while still
+          allowing the wrapper to scroll on a short one. */}
+      <div className="relative flex min-h-full items-center justify-center p-3 sm:p-6">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={typeof title === 'string' ? title : undefined}
+          className={`modal-panel relative flex w-full flex-col overflow-hidden rounded-xl border border-line
+            bg-surface shadow-lift animate-fade-up ${wide ? 'max-w-4xl' : 'max-w-lg'}`}
+        >
+          <header className="flex shrink-0 items-center justify-between border-b border-line bg-white/[0.02] px-5 py-3.5">
+            <h2 className="font-display text-xl flex items-center gap-2.5">
+              <span className="h-4 w-1 rounded-full bg-gold-grad" />
+              {title}
+            </h2>
+            <button type="button" onClick={onClose} className="btn-quiet px-2 py-1" aria-label="Close">✕</button>
+          </header>
+
+          {/* flex-1 min-h-0 is what makes this actually scroll inside the panel. */}
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain scroll-thin px-5 py-4">
+            {children}
+          </div>
+        </div>
       </div>
     </div>
   );

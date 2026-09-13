@@ -411,6 +411,32 @@ headline statistics, the latest assessment, training attendance, tracked accurac
 tests. Nothing is weighted or ranked. The point is to make a selection argument checkable, not to
 make the decision.
 
+## When a page fails
+
+A render error in React unmounts the whole tree, which means a blank screen with no navigation — one
+broken page becomes a total outage and the person cannot even go back to where they came from.
+
+`components/PageErrorBoundary.jsx` sits *inside* the shell, so the sidebar and header survive a
+failure: the page area explains what happened, shows the error message, and offers to retry or
+reload, while the rest of the platform stays reachable. Navigating away clears it.
+
+`web/scripts/error-boundary-test.mjs` mounts a component that throws on purpose and asserts the shell
+is still standing.
+
+## Dialogs
+
+Every form dialog is centred and scrolls inside itself: the panel is capped to the viewport height,
+its body is the scrolling region, and the title bar stays pinned while the form moves under it. The
+submit button sits at the end of that scrolling region, so it is always reachable however long the
+form is.
+
+Two details are load-bearing and easy to undo by accident. The scrolling body needs `min-h-0` — as a
+flex child without it, it grows to fit its content, the panel clips it, and nothing scrolls at all.
+And the height cap is written as real CSS with a `100vh` value and a `@supports`-guarded `100dvh`
+override, because an unrecognised `dvh` is dropped silently and a dropped cap brings the bug back.
+
+`web/scripts/dialog-scroll-test.mjs` asserts all of it for every dialog in the app.
+
 ## Which build am I looking at?
 
 The bottom of the sidebar shows a build timestamp, set when the bundle was compiled. If a change you
@@ -423,6 +449,58 @@ npm run build:pages    # then commit docs/ and push, for the GitHub Pages demo
 ```
 
 Hard-refresh (Ctrl+Shift+R) after deploying. The Pages demo only changes when you push.
+
+## Signing in, and booking without an account
+
+The sign-in screen is a single centred card: a choice between **Athlete** and **Staff**, email or
+phone, password, and below a divider, **Book now as a guest**.
+
+Athlete and staff are separate sign-ins because they are separate things — an athlete login lives in
+its own table, carries no role, and opens only that athlete's own record (see below).
+
+**Booking needs no account at all.** `/book` walks through sport, ground, date and time, an optional
+coach, and a name with one contact. Nothing about an athlete is asked for or stored, so booking can
+never introduce a duplicate athlete record.
+
+Coaches are shown as cards rather than a dropdown, because which coach to book comes down to what
+they specialise in and how long they have done it — a list of names carries neither.
+
+Two things make the availability honest. Grounds are records now rather than free text, so a slot is
+marked unavailable when the club already needs it for a fixture or a training session, not only when
+another guest has booked it. And double booking is prevented by the database: three simultaneous
+requests for one slot leave exactly one winner, which an application-level check cannot guarantee.
+
+A booking is looked up and cancelled with its reference plus the contact it was made with.
+
+## One athlete, one record
+
+The identity is the athlete's own name and date of birth, which is unique in the database. Email and
+phone are checked as well, because a guardian's contact is often shared between siblings: a matching
+email alone proves nothing, but the same *name* on the same contact almost always means the record is
+being entered twice. Any match is refused with the existing athlete ID, so whoever is entering it can
+go and find the record rather than working around the error.
+
+## Athlete logins
+
+Athlete portal credentials are **not** staff accounts. They live in their own table with a unique key
+on the athlete, and — deliberately — no role column at all.
+
+That last point is the security property. A staff account carries a role, scopes and permissions, so
+raising one to administrator is a matter of changing a field. An athlete login has no such field, so
+it cannot be escalated: its capability is fixed by the shape of the table. The tokens carry a
+different audience too, so an athlete credential is rejected by every staff route and a staff
+credential is rejected by the portal.
+
+Every portal endpoint reads the athlete's id from the token. None of them takes an athlete id as a
+parameter, so reading somebody else's record is not a permission that has been withheld — it is a
+request that cannot be expressed.
+
+Manage them from **User manager → Athlete logins**, the third tab after Accounts and Roles &
+permissions: issue a login, edit the sign-in address, suspend it, reset the password, or remove it.
+Removing a login takes away the athlete's way of signing in and leaves their record untouched.
+
+One login per athlete is enforced by the database, an athlete address cannot collide with a staff
+one, and issuing a login never creates an athlete record — it always attaches to one that exists.
 
 ## The administrator account
 

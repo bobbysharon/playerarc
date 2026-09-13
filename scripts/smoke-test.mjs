@@ -722,6 +722,239 @@ await check('comparing fewer than two athletes is refused', async () => {
   return r.status === 422;
 });
 
+
+/* ---- Athlete portal: separate credentials, own record only ---- */
+let athleteLoginId;
+let athleteEmail;
+await check('athlete logins are listed apart from staff accounts', async () => {
+  const r = await req('/admin/athlete-logins');
+  const first = r.d.logins.find((l) => l.status === 'active');
+  athleteLoginId = first?.id;
+  athleteEmail = first?.email;
+  return r.status === 200 && r.d.logins.length > 0 && r.d.athletesWithoutLogin.length > 0
+    && r.d.logins.every((l) => !('role' in l));
+});
+let athleteToken;
+await check('an athlete signs in to their own portal', async () => {
+  const r = await req('/athlete/login', { method: 'POST', body: { email: athleteEmail, password: 'Karwan@2026' } });
+  athleteToken = r.d.token;
+  return r.status === 200 && !!athleteToken && !('role' in r.d.athlete);
+});
+await check('the portal returns only their own record', async () => {
+  const r = await fetch(`${BASE}/athlete/record`, { headers: { Authorization: `Bearer ${athleteToken}` } });
+  const d = await r.json();
+  const listed = (await req('/admin/athlete-logins')).d.logins.find((l) => l.email === athleteEmail);
+  return r.ok && d.athlete.athleteId === listed.athlete_id;
+});
+await check('an athlete token opens nothing else', async () => {
+  const paths = ['/players', '/players/1', '/admin/users', '/admin/athlete-logins', '/reports/player/1', '/tracking/sessions'];
+  for (const path of paths) {
+    const r = await fetch(BASE + path, { headers: { Authorization: `Bearer ${athleteToken}` } });
+    if (r.status !== 401 && r.status !== 403) return false;
+  }
+  return true;
+});
+await check('a staff token is refused by the portal', async () => {
+  const r = await fetch(`${BASE}/athlete/record`, { headers: { Authorization: `Bearer ${adminToken}` } });
+  return r.status === 403;
+});
+await check('an athlete can only have one login', async () => {
+  const first = (await req('/admin/athlete-logins')).d.logins[0];
+  const r = await req('/admin/athlete-logins', {
+    method: 'POST', body: { player_id: first.player_id, email: `dupe.${Date.now()}@athlete.playerarc.local` },
+  });
+  return r.status === 409;
+});
+await check('an athlete cannot reuse a staff address', async () => {
+  const free = (await req('/admin/athlete-logins')).d.athletesWithoutLogin[0];
+  const r = await req('/admin/athlete-logins', {
+    method: 'POST', body: { player_id: free.id, email: 'admin@playerarc.local' },
+  });
+  return r.status === 409;
+});
+await check('issuing a login never creates an athlete', async () => {
+  const before = (await req('/players?pageSize=1')).d.total;
+  const free = (await req('/admin/athlete-logins')).d.athletesWithoutLogin[0];
+  const made = await req('/admin/athlete-logins', {
+    method: 'POST', body: { player_id: free.id, email: `issued.${Date.now()}@athlete.playerarc.local` },
+  });
+  const after = (await req('/players?pageSize=1')).d.total;
+  return made.status === 201 && !!made.d.password && before === after;
+});
+await check('the administrator can reset an athlete password', async () => {
+  const r = await req(`/admin/athlete-logins/${athleteLoginId}/password`, {
+    method: 'POST', body: { password: 'AthletePass123', mustChange: false },
+  });
+  const signIn = await req('/athlete/login', { method: 'POST', body: { email: athleteEmail, password: 'AthletePass123' } });
+  // Restore the seeded password so the suite is repeatable.
+  await req(`/admin/athlete-logins/${athleteLoginId}/password`, { method: 'POST', body: { password: 'Karwan@2026', mustChange: false } });
+  return r.status === 200 && signIn.status === 200;
+});
+await check('removing an athlete login leaves the athlete record', async () => {
+  const free = (await req('/admin/athlete-logins')).d.athletesWithoutLogin[0];
+  const made = await req('/admin/athlete-logins', {
+    method: 'POST', body: { player_id: free.id, email: `temp.${Date.now()}@athlete.playerarc.local` },
+  });
+  const before = (await req('/players?pageSize=1')).d.total;
+  const removed = await req(`/admin/athlete-logins/${made.d.id}`, { method: 'DELETE' });
+  const after = (await req('/players?pageSize=1')).d.total;
+  return removed.status === 200 && before === after;
+});
+await check('only the administrator manages athlete logins', async () => {
+  token = coachLogin.d.token;
+  const r = await req('/admin/athlete-logins');
+  token = adminToken;
+  return r.status === 403;
+});
+
+
+/* ---- Booking a ground, without an account ---- */
+const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+let bookingRef;
+let guestSlot;
+let guestGround;
+
+await check('sports and grounds are public', async () => {
+  const sports = await fetch(`${BASE}/booking/sports`);
+  const s = await sports.json();
+  const cricket = s.sports.find((x) => x.code === 'cricket');
+  const grounds = await (await fetch(`${BASE}/facilities?sport=${cricket.id}`)).json();
+  guestGround = grounds.facilities.find((f) => f.hourly_rate);
+  return sports.ok && s.sports.length > 0 && grounds.facilities.length > 0;
+});
+await check('coaches carry a speciality and years of experience', async () => {
+  const r = await (await fetch(`${BASE}/booking/coaches`)).json();
+  return r.coaches.length > 0
+    && r.coaches.every((c) => c.name && c.speciality && typeof c.yearsExperience === 'number');
+});
+await check('availability is public and marks club use', async () => {
+  const r = await fetch(`${BASE}/booking/availability?facility=${guestGround.id}&date=${tomorrow}`);
+  const d = await r.json();
+  guestSlot = d.slots.find((x) => x.available);
+  return r.ok && d.slots.length > 0 && !!guestSlot;
+});
+await check('a guest books without signing in', async () => {
+  const r = await fetch(`${BASE}/booking`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      facility_id: guestGround.id, booking_date: tomorrow,
+      start_time: guestSlot.start, end_time: guestSlot.end,
+      contact_name: 'Suite Guest', contact_phone: '+971 50 777 6666',
+    }),
+  });
+  const d = await r.json();
+  bookingRef = d.booking?.reference;
+  return r.status === 201 && !!bookingRef;
+});
+await check('a booking holds no athlete details', async () => {
+  const d = await (await fetch(`${BASE}/booking/${bookingRef}`)).json();
+  return !Object.keys(d.booking).some((k) => /athlete|player|dob|birth/i.test(k));
+});
+await check('the same slot cannot be taken twice', async () => {
+  const r = await fetch(`${BASE}/booking`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      facility_id: guestGround.id, booking_date: tomorrow,
+      start_time: guestSlot.start, end_time: guestSlot.end,
+      contact_name: 'Late Guest', contact_phone: '+971 50 111 2222',
+    }),
+  });
+  return r.status === 409;
+});
+await check('concurrent requests for one slot leave a single winner', async () => {
+  const avail = await (await fetch(`${BASE}/booking/availability?facility=${guestGround.id}&date=${tomorrow}`)).json();
+  const slot = avail.slots.filter((x) => x.available)[0];
+  if (!slot) return false;
+  const attempts = await Promise.all([1, 2, 3].map((n) => fetch(`${BASE}/booking`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      facility_id: guestGround.id, booking_date: tomorrow,
+      start_time: slot.start, end_time: slot.end,
+      contact_name: `Race ${n}`, contact_phone: `+971 50 000 111${n}`,
+    }),
+  })));
+  return attempts.filter((r) => r.status === 201).length === 1;
+});
+await check('bookings outside opening hours and in the past are refused', async () => {
+  const early = await fetch(`${BASE}/booking`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      facility_id: guestGround.id, booking_date: tomorrow, start_time: '03:00', end_time: '04:00',
+      contact_name: 'Early', contact_phone: '+971 50 111 1111',
+    }),
+  });
+  const past = await fetch(`${BASE}/booking`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      facility_id: guestGround.id, booking_date: '2020-01-01', start_time: '10:00', end_time: '11:00',
+      contact_name: 'Past', contact_phone: '+971 50 111 1111',
+    }),
+  });
+  return early.status === 422 && past.status === 422;
+});
+await check('a booking needs a way to reach whoever made it', async () => {
+  const r = await fetch(`${BASE}/booking`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      facility_id: guestGround.id, booking_date: tomorrow, start_time: '21:00', end_time: '22:00',
+      contact_name: 'No Contact',
+    }),
+  });
+  return r.status === 422;
+});
+await check('cancelling requires the contact it was made with', async () => {
+  const wrong = await fetch(`${BASE}/booking/${bookingRef}/cancel`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ contact: 'someone-else' }),
+  });
+  const right = await fetch(`${BASE}/booking/${bookingRef}/cancel`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ contact: '+971 50 777 6666' }),
+  });
+  return wrong.status === 403 && right.status === 200;
+});
+
+/* ---- One athlete, one record ---- */
+await check('the same name and date of birth is refused', async () => {
+  const p = (await req('/players?pageSize=1')).d.players[0];
+  const full = (await req(`/players/${p.id}`)).d.player;
+  const r = await req('/players', {
+    method: 'POST',
+    body: { first_name: full.first_name, last_name: full.last_name, dob: full.dob, gender: full.gender },
+  });
+  return r.status === 409 && r.d.error.includes(full.athlete_id ?? 'KSC');
+});
+await check('the same name on the same email is refused', async () => {
+  const p = (await req('/players?pageSize=1')).d.players[0];
+  const full = (await req(`/players/${p.id}`)).d.player;
+  if (!full.email) return true;
+  const r = await req('/players', {
+    method: 'POST',
+    body: { first_name: full.first_name, last_name: full.last_name, dob: '2001-01-01', gender: full.gender, email: full.email },
+  });
+  return r.status === 409;
+});
+await check('the same name on the same phone is refused', async () => {
+  const p = (await req('/players?pageSize=1')).d.players[0];
+  const full = (await req(`/players/${p.id}`)).d.player;
+  if (!full.phone) return true;
+  const r = await req('/players', {
+    method: 'POST',
+    body: { first_name: full.first_name, last_name: full.last_name, dob: '2002-02-02', gender: full.gender, phone: full.phone },
+  });
+  return r.status === 409;
+});
+await check('a genuinely new athlete still registers', async () => {
+  const r = await req('/players', {
+    method: 'POST',
+    body: {
+      first_name: 'Zayn', last_name: `Case${Date.now().toString().slice(-6)}`,
+      dob: '2005-05-05', gender: 'male', email: `zayn.${Date.now()}@example.com`,
+    },
+  });
+  return r.status === 201;
+});
+
 /* ---- Single page app is served ---- */
 const origin = BASE.replace('/api', '');
 await check('web app served at /', async () => {

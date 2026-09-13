@@ -31,7 +31,7 @@ const TABLES = [
   'drills', 'session_templates', 'session_template_drills', 'training_session_drills',
   'benchmarks', 'announcements', 'announcement_recipients',
   'tracking_sessions', 'deliveries', 'consistency_targets', 'fitness_records',
-  'assessment_templates', 'assessment_template_criteria',
+  'assessment_templates', 'assessment_template_criteria', 'athlete_logins',
 ];
 
 const data = {};

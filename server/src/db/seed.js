@@ -1781,6 +1781,186 @@ async function main() {
 
   console.log(`[seed] ${trackedDeliveries} tracked deliveries across ${trackedSessions} sessions; ${fitnessRows} fitness records; ${TEMPLATES.length} assessment templates`);
 
+
+  /* ---- Athlete portal logins ---------------------------------------- */
+  //
+  // A handful of athletes are given portal access so the separation can be
+  // seen working: these credentials live outside `users`, carry no role, and
+  // open nothing but the athlete's own record.
+
+  tx(() => {
+    const featured = db
+      .prepare(`SELECT p.id, p.athlete_id, p.first_name, p.last_name FROM players p
+                JOIN match_performances mp ON mp.player_id = p.id
+                GROUP BY p.id ORDER BY COUNT(mp.id) DESC LIMIT 8`)
+      .all();
+
+    const stmt = db.prepare(`
+      INSERT OR IGNORE INTO athlete_logins (player_id, email, password_hash, status, must_change_password, is_demo, created_by)
+      VALUES (?,?,?,?,0,1,?)
+    `);
+    featured.forEach((p, i) => stmt.run(
+      p.id,
+      `${p.first_name}.${p.last_name}`.toLowerCase().replace(/[^a-z.]/g, '') + '@athlete.playerarc.local',
+      hash,
+      i === 7 ? 'suspended' : 'active',
+      adminId,
+    ));
+  });
+
+  const athleteLoginCount = db.prepare('SELECT COUNT(*) AS c FROM athlete_logins').get().c;
+  console.log(`[seed] ${athleteLoginCount} athlete portal logins (separate from staff accounts)`);
+
+
+  /* ---- Grounds, coach specialities and bookings --------------------- */
+  //
+  // The venues that were free text on matches and training sessions become
+  // records here, under exactly the same names, so availability can tell when
+  // the club already needs a ground.
+
+  const facilityStmt = db.prepare(`
+    INSERT OR IGNORE INTO facilities (name, kind, description, surface, capacity, opens_at, closes_at,
+      slot_minutes, hourly_rate, location_note, is_bookable, is_demo)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,1)
+  `);
+  const facilitySportStmt = db.prepare(
+    'INSERT OR IGNORE INTO facility_sports (facility_id, sport_id) VALUES (?,?)',
+  );
+
+  const FACILITIES = [
+    ['Karwan Main Ground', 'ground', 'Full-size turf square with practice outfield.', 'Turf', 3000, '06:00', '22:00', 60, 220,
+      'Main entrance, past the pavilion', 1, ['cricket', 'football']],
+    ['Karwan Practice Nets', 'net', 'Four covered lanes, two turf and two matting.', 'Turf and matting', 8, '06:00', '22:00', 60, 90,
+      'Behind the main stand', 1, ['cricket']],
+    ['Karwan Indoor Arena', 'hall', 'Sprung indoor floor, marked for several sports.', 'Sprung timber', 200, '07:00', '23:00', 60, 160,
+      'Indoor complex, first floor', 1, ['basketball', 'badminton', 'table_tennis', 'futsal', 'volleyball']],
+    ['Sharjah Sports Complex', 'ground', 'Secondary grass pitch used for age-group fixtures.', 'Grass', 800, '06:00', '21:00', 60, 140,
+      'Ten minutes from the club', 1, ['football', 'cricket']],
+    ['Karwan Fitness Centre', 'gym', 'Strength and conditioning room with platforms.', 'Rubber', 30, '05:30', '23:00', 60, 60,
+      'Ground floor of the pavilion', 1, []],
+  ];
+
+  tx(() => {
+    for (const [name, kind, description, surface, capacity, opens, closes, slot, rate, where, bookable, sports] of FACILITIES) {
+      facilityStmt.run(name, kind, description, surface, capacity, opens, closes, slot, rate, where, bookable);
+      const fid = db.prepare('SELECT id FROM facilities WHERE name = ?').get(name).id;
+      sports.forEach((code) => {
+        const sid = sportId(code);
+        if (sid) facilitySportStmt.run(fid, sid);
+      });
+    }
+
+    // Anything already written against a venue that is not one of these gets
+    // a record too, so no fixture is left pointing at a ground that does not
+    // exist as far as availability is concerned.
+    const loose = db
+      .prepare(`SELECT DISTINCT venue AS name FROM matches WHERE venue IS NOT NULL AND venue != ''
+                UNION SELECT DISTINCT location FROM training_sessions WHERE location IS NOT NULL AND location != ''`)
+      .all()
+      .filter((r) => !db.prepare('SELECT id FROM facilities WHERE name = ?').get(r.name));
+    loose.forEach((r) => facilityStmt.run(r.name, 'ground', 'Recorded against existing fixtures.', null, null,
+      '06:00', '22:00', 60, null, null, 0));
+  });
+
+  /* ---- What each coach is known for --------------------------------- */
+
+  const specialityStmt = db.prepare(`
+    INSERT OR IGNORE INTO coach_specialities (coach_id, sport_id, speciality, years_experience, is_primary, bookable, hourly_rate, bio, is_demo)
+    VALUES (?,?,?,?,?,?,?,?,1)
+  `);
+
+  const SPECIALITIES = [
+    ['Yusuf Baig', 'cricket', 'Batting technique', 16, 1, 180,
+      'Works on the front foot and playing late. Took three age-group sides to national finals.'],
+    ['Yusuf Baig', 'cricket', 'Spin bowling', 9, 0, 160,
+      'Finger and wrist spin, with a focus on flight and drift rather than pace.'],
+    ['Imran Qureshi', 'cricket', 'Fast bowling', 12, 1, 175,
+      'Run-up, load and repeatable action. Former first-class seamer.'],
+    ['Imran Qureshi', 'cricket', 'Death bowling', 7, 0, 165,
+      'Yorkers and slower balls under scoreboard pressure.'],
+    ['Daniel Okafor', 'football', 'Attacking play', 14, 1, 170,
+      'Movement in the final third, finishing and combination play.'],
+    ['Daniel Okafor', 'futsal', 'Small-sided game', 6, 0, 150,
+      'Close control and pressing in tight spaces.'],
+    ['Marcus Fernandes', 'football', 'Defensive organisation', 11, 1, 165,
+      'Back-line shape, pressing triggers and set-piece defending.'],
+    ['Omar Haddad', 'basketball', 'Shooting mechanics', 10, 1, 155,
+      'Form, footwork and shooting off the dribble.'],
+    ['Lakshmi Rao', 'badminton', 'Court movement', 13, 1, 145,
+      'Footwork patterns, recovery and deception at the net.'],
+    ['Wei Chen', 'table_tennis', 'Forehand and topspin', 15, 1, 140,
+      'Multiball work and rotation through the waist.'],
+    ['Priya Menon', null, 'Strength and conditioning', 12, 1, 130,
+      'Programmes for young athletes, with return-to-play screening.'],
+    ['Priya Menon', null, 'Speed and agility', 8, 0, 130,
+      'Acceleration mechanics and change of direction.'],
+  ];
+
+  tx(() => {
+    for (const [coachName, sport, speciality, years, primary, rate, bio] of SPECIALITIES) {
+      const cid = coachId(coachName);
+      if (!cid) continue;
+      specialityStmt.run(cid, sport ? sportId(sport) : null, speciality, years, primary, 1, rate, bio);
+    }
+  });
+
+  /* ---- A few bookings already on the sheet -------------------------- */
+
+  const bookingStmt = db.prepare(`
+    INSERT OR IGNORE INTO bookings (reference, facility_id, sport_id, coach_id, booking_date, start_time, end_time,
+      start_minute, end_minute, booked_by, contact_name, contact_phone, contact_email, party_size, notes,
+      status, amount, currency, is_demo)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'AED', 1)
+  `);
+
+  const GUEST_NAMES = ['Rashid Al Balushi', 'Meera Nair', 'Tom Whitfield', 'Aisha Rahman', 'Vikram Sethi', 'Layla Haddad'];
+  let bookingCount = 0;
+
+  tx(() => {
+    const bookable = db.prepare('SELECT * FROM facilities WHERE is_bookable = 1').all();
+    for (let dayOffset = -6; dayOffset <= 12; dayOffset += 1) {
+      const date = iso(new Date(today.getFullYear(), today.getMonth(), today.getDate() + dayOffset));
+      for (let n = 0; n < int(1, 3); n += 1) {
+        const facility = pick(bookable);
+        const startHour = int(7, 20);
+        const start = startHour * 60;
+        const end = start + 60;
+
+        // Skip anything already taken, so the seeded sheet is internally
+        // consistent rather than full of impossible double bookings.
+        const clash = db
+          .prepare(`SELECT id FROM bookings WHERE facility_id = ? AND booking_date = ?
+                    AND start_minute < ? AND end_minute > ?`)
+          .get(facility.id, date, end, start);
+        if (clash) continue;
+
+        const sports = db.prepare('SELECT sport_id FROM facility_sports WHERE facility_id = ?').all(facility.id);
+        const sid = sports.length ? pick(sports).sport_id : null;
+        const withCoach = chance(0.45);
+        const coachRow = withCoach && sid
+          ? db.prepare('SELECT coach_id FROM coach_specialities WHERE sport_id = ? AND bookable = 1 ORDER BY random() LIMIT 1').get(sid)
+          : null;
+
+        const name = pick(GUEST_NAMES);
+        bookingStmt.run(
+          `BK-${String(1000 + bookingCount).toString(16).toUpperCase()}`,
+          facility.id, sid, coachRow ? coachRow.coach_id : null,
+          date, `${String(startHour).padStart(2, '0')}:00`, `${String(startHour + 1).padStart(2, '0')}:00`,
+          start, end, 'guest', name,
+          `+971 5${int(0, 9)} ${int(100, 999)} ${int(1000, 9999)}`,
+          `${name.split(' ')[0].toLowerCase()}@example.com`,
+          int(2, 12),
+          pick([null, 'Practice session', 'Birthday game', 'Corporate booking', null]),
+          dayOffset < 0 ? 'completed' : 'confirmed',
+          facility.hourly_rate,
+        );
+        bookingCount += 1;
+      }
+    }
+  });
+
+  console.log(`[seed] ${db.prepare('SELECT COUNT(*) AS c FROM facilities').get().c} grounds, ${SPECIALITIES.length} coach specialities, ${bookingCount} bookings`);
+
   const counts = {
     users: db.prepare('SELECT COUNT(*) AS c FROM users').get().c,
     players: db.prepare('SELECT COUNT(*) AS c FROM players').get().c,
@@ -1795,6 +1975,9 @@ async function main() {
     periods: db.prepare('SELECT COUNT(*) AS c FROM match_periods').get().c,
     drills: db.prepare('SELECT COUNT(*) AS c FROM drills').get().c,
     benchmarks: db.prepare('SELECT COUNT(*) AS c FROM benchmarks').get().c,
+    athleteLogins: db.prepare('SELECT COUNT(*) AS c FROM athlete_logins').get().c,
+    grounds: db.prepare('SELECT COUNT(*) AS c FROM facilities').get().c,
+    bookings: db.prepare('SELECT COUNT(*) AS c FROM bookings').get().c,
     tracked: db.prepare('SELECT COUNT(*) AS c FROM deliveries').get().c,
     fitness: db.prepare('SELECT COUNT(*) AS c FROM fitness_records').get().c,
     announcements: db.prepare('SELECT COUNT(*) AS c FROM announcements').get().c,

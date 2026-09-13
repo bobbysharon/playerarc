@@ -32,6 +32,9 @@ export const DEMO_PASSWORD = 'Karwan@2026';
  */
 let passwords = {};
 
+/** Athlete portal passwords, held the same way and for the same reason. */
+let athletePasswords = {};
+
 /* ------------------------------------------------------------------ */
 /* Store                                                               */
 /* ------------------------------------------------------------------ */
@@ -43,6 +46,7 @@ function reset() {
   db = JSON.parse(JSON.stringify(dataset));
   if (!db.audit_logs) db.audit_logs = [];
   passwords = {};
+  athletePasswords = {};
   session = null;
 }
 
@@ -2368,6 +2372,103 @@ route('GET', /^\/selection\/compare$/, (_, __, query) => {
     rows,
     note: "Every figure here is taken from the athlete's own record. Nothing is weighted or ranked — that judgement stays with the selectors.",
   };
+});
+
+
+/* ---- Athlete portal logins (kept apart from staff accounts) ---- */
+
+route('GET', /^\/admin\/athlete-logins$/, () => {
+  requirePermission('*');
+  const logins = filter('athlete_logins', () => true).map((a) => {
+    const p = playerOf(a.player_id) || {};
+    return {
+      id: a.id, player_id: a.player_id, email: a.email, status: a.status,
+      must_change_password: a.must_change_password, last_login_at: a.last_login_at, created_at: a.created_at,
+      athlete_id: p.athlete_id, first_name: p.first_name, last_name: p.last_name,
+      display_name: p.display_name, photo_url: p.photo_url, player_status: p.status,
+    };
+  }).sort((a, b) => String(a.first_name).localeCompare(String(b.first_name)));
+
+  const withLogin = new Set(logins.map((l) => l.player_id));
+  return {
+    logins,
+    athletesWithoutLogin: all('players').filter((p) => !withLogin.has(p.id))
+      .map((p) => ({ id: p.id, athlete_id: p.athlete_id, first_name: p.first_name, last_name: p.last_name, display_name: p.display_name, email: p.email })),
+    total: logins.length,
+  };
+});
+
+route('POST', /^\/admin\/athlete-logins$/, (_, body) => {
+  requirePermission('*');
+  const player = playerOf(body.player_id);
+  if (!player) fail(404, 'That athlete record does not exist.');
+  if (find('athlete_logins', (a) => a.player_id === Number(body.player_id))) {
+    fail(409, `${player.first_name} ${player.last_name} already has a portal login. Reset its password instead of creating a second one.`);
+  }
+  if (find('athlete_logins', (a) => String(a.email).toLowerCase() === String(body.email).toLowerCase())) {
+    fail(409, 'Another athlete already uses that email address.');
+  }
+  if (find('users', (u) => String(u.email).toLowerCase() === String(body.email).toLowerCase())) {
+    fail(409, 'That address belongs to a staff account. Athlete logins are kept separate.');
+  }
+
+  const words = ['Falcon', 'Summit', 'Harbour', 'Cypress', 'Kestrel', 'Lantern', 'Meridian', 'Quarry'];
+  const pick2 = () => words[Math.floor(Math.random() * words.length)];
+  const password = body.password || `${pick2()}-${pick2()}-${Math.floor(1000 + Math.random() * 9000)}`;
+  const mustChange = body.mustChange !== false;
+
+  const row = {
+    id: nextId('athlete_logins'), player_id: Number(body.player_id), email: body.email,
+    password_hash: 'demo', status: body.status || 'active',
+    must_change_password: mustChange ? 1 : 0, last_login_at: null, is_demo: 0,
+    created_by: session.id, created_at: now(), updated_at: now(),
+  };
+  if (!db.athlete_logins) db.athlete_logins = [];
+  db.athlete_logins.push(row);
+  athletePasswords[row.id] = password;
+  audit('create', 'athlete_logins', row.id, `Athlete portal login created for ${player.athlete_id}`);
+  return { id: row.id, password, generated: !body.password, mustChange };
+});
+
+route('PUT', /^\/admin\/athlete-logins\/(\d+)$/, (m, body) => {
+  requirePermission('*');
+  const row = byId('athlete_logins', m[1]);
+  if (!row) fail(404, 'That athlete login does not exist.');
+  if (body.email) {
+    if (find('athlete_logins', (a) => a.id !== row.id && String(a.email).toLowerCase() === String(body.email).toLowerCase())) {
+      fail(409, 'Another athlete already uses that email address.');
+    }
+    if (find('users', (u) => String(u.email).toLowerCase() === String(body.email).toLowerCase())) {
+      fail(409, 'That address belongs to a staff account. Athlete logins are kept separate.');
+    }
+  }
+  Object.assign(row, body, { updated_at: now() });
+  audit('update', 'athlete_logins', row.id, `Athlete login updated: ${row.email}`);
+  return { ok: true };
+});
+
+route('POST', /^\/admin\/athlete-logins\/(\d+)\/password$/, (m, body) => {
+  requirePermission('*');
+  const row = byId('athlete_logins', m[1]);
+  if (!row) fail(404, 'That athlete login does not exist.');
+  if (body.password !== undefined && String(body.password).length < 8) fail(422, 'Use at least 8 characters.');
+  const words = ['Falcon', 'Summit', 'Harbour', 'Cypress', 'Kestrel', 'Lantern'];
+  const pick2 = () => words[Math.floor(Math.random() * words.length)];
+  const password = body.password || `${pick2()}-${pick2()}-${Math.floor(1000 + Math.random() * 9000)}`;
+  athletePasswords[row.id] = password;
+  row.must_change_password = body.mustChange !== false ? 1 : 0;
+  row.updated_at = now();
+  audit('update', 'athlete_logins', row.id, `Athlete password issued for ${row.email}`);
+  return { ok: true, password, generated: !body.password, mustChange: !!row.must_change_password };
+});
+
+route('DELETE', /^\/admin\/athlete-logins\/(\d+)$/, (m) => {
+  requirePermission('*');
+  const row = byId('athlete_logins', m[1]);
+  if (!row) fail(404, 'That athlete login does not exist.');
+  db.athlete_logins = db.athlete_logins.filter((a) => a.id !== row.id);
+  audit('delete', 'athlete_logins', row.id, `Athlete portal login removed: ${row.email}`);
+  return { ok: true };
 });
 
 /* ---- Training ---- */

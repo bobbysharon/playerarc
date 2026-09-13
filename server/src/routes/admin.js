@@ -198,6 +198,138 @@ function generatePassword() {
   return `${pick()}-${pick()}-${String(crypto.randomInt(1000, 9999))}`;
 }
 
+
+/* ================================================================== */
+/* Athlete portal logins                                              */
+/*                                                                    */
+/* Managed here because only an administrator issues them, but stored */
+/* apart from staff accounts: an athlete login has no role to change, */
+/* and exactly one can exist per athlete.                             */
+/* ================================================================== */
+
+router.get('/athlete-logins', adminOnly, (req, res) => {
+  const logins = db
+    .prepare(`SELECT a.id, a.player_id, a.email, a.status, a.must_change_password, a.last_login_at, a.created_at,
+                     p.athlete_id, p.first_name, p.last_name, p.display_name, p.photo_url, p.status AS player_status
+              FROM athlete_logins a JOIN players p ON p.id = a.player_id
+              ORDER BY p.first_name, p.last_name`)
+    .all();
+
+  // Athletes who could be given one, so the form need not search twice.
+  const without = db
+    .prepare(`SELECT p.id, p.athlete_id, p.first_name, p.last_name, p.display_name, p.email
+              FROM players p WHERE p.id NOT IN (SELECT player_id FROM athlete_logins)
+              ORDER BY p.first_name, p.last_name`)
+    .all();
+
+  res.json({ logins, athletesWithoutLogin: without, total: logins.length });
+});
+
+const athleteLoginSchema = z.object({
+  player_id: z.coerce.number().int(),
+  email: z.string().email('Enter a valid email address'),
+  password: z.string().min(8, 'Use at least 8 characters').optional(),
+  status: z.enum(['active', 'suspended', 'invited']).default('active'),
+  mustChange: z.coerce.boolean().default(true),
+});
+
+router.post('/athlete-logins', adminOnly, asyncHandler(async (req, res) => {
+  const body = athleteLoginSchema.parse(req.body);
+
+  const player = db.prepare('SELECT * FROM players WHERE id = ?').get(body.player_id);
+  if (!player) throw new ApiError(404, 'That athlete record does not exist.');
+
+  // One login per athlete, and never a second athlete record.
+  const existing = db.prepare('SELECT id FROM athlete_logins WHERE player_id = ?').get(body.player_id);
+  if (existing) {
+    throw new ApiError(409, `${player.first_name} ${player.last_name} already has a portal login. Reset its password instead of creating a second one.`);
+  }
+  const taken = db.prepare('SELECT id FROM athlete_logins WHERE lower(email) = lower(?)').get(body.email);
+  if (taken) throw new ApiError(409, 'Another athlete already uses that email address.');
+  const staff = db.prepare('SELECT id FROM users WHERE lower(email) = lower(?)').get(body.email);
+  if (staff) throw new ApiError(409, 'That address belongs to a staff account. Athlete logins are kept separate.');
+
+  const password = body.password || generatePassword();
+  const info = db
+    .prepare(`INSERT INTO athlete_logins (player_id, email, password_hash, status, must_change_password, created_by)
+              VALUES (?,?,?,?,?,?)`)
+    .run(body.player_id, body.email, await bcrypt.hash(password, 10), body.status, body.mustChange ? 1 : 0, req.user.id);
+
+  audit(req, {
+    action: 'create', entity: 'athlete_logins', entityId: info.lastInsertRowid,
+    summary: `Athlete portal login created for ${player.athlete_id}`,
+  });
+
+  // Returned once so it can be handed over; only the hash is kept.
+  res.status(201).json({
+    id: info.lastInsertRowid,
+    password,
+    generated: !body.password,
+    mustChange: !!body.mustChange,
+  });
+}));
+
+router.put('/athlete-logins/:id', adminOnly, asyncHandler(async (req, res) => {
+  const login = db.prepare('SELECT * FROM athlete_logins WHERE id = ?').get(req.params.id);
+  if (!login) throw new ApiError(404, 'That athlete login does not exist.');
+
+  const body = z.object({
+    email: z.string().email('Enter a valid email address').optional(),
+    status: z.enum(['active', 'suspended', 'invited']).optional(),
+  }).parse(req.body);
+
+  if (body.email) {
+    const taken = db.prepare('SELECT id FROM athlete_logins WHERE lower(email) = lower(?) AND id != ?').get(body.email, login.id);
+    if (taken) throw new ApiError(409, 'Another athlete already uses that email address.');
+    const staff = db.prepare('SELECT id FROM users WHERE lower(email) = lower(?)').get(body.email);
+    if (staff) throw new ApiError(409, 'That address belongs to a staff account. Athlete logins are kept separate.');
+  }
+
+  const sets = Object.keys(body).map((k) => `${k} = ?`);
+  if (sets.length) {
+    db.prepare(`UPDATE athlete_logins SET ${sets.join(', ')}, updated_at = datetime('now') WHERE id = ?`)
+      .run(...Object.values(body), login.id);
+  }
+  audit(req, { action: 'update', entity: 'athlete_logins', entityId: login.id, summary: `Athlete login updated: ${login.email}` });
+  res.json({ ok: true });
+}));
+
+/**
+ * Issue a password. As with staff accounts the stored value is a hash, so an
+ * existing password cannot be shown — only replaced.
+ */
+router.post('/athlete-logins/:id/password', adminOnly, asyncHandler(async (req, res) => {
+  const login = db.prepare('SELECT * FROM athlete_logins WHERE id = ?').get(req.params.id);
+  if (!login) throw new ApiError(404, 'That athlete login does not exist.');
+
+  const body = z.object({
+    password: z.string().min(8, 'Use at least 8 characters').optional(),
+    mustChange: z.coerce.boolean().default(true),
+  }).parse(req.body);
+
+  const password = body.password || generatePassword();
+  db.prepare(`UPDATE athlete_logins SET password_hash = ?, must_change_password = ?, updated_at = datetime('now') WHERE id = ?`)
+    .run(await bcrypt.hash(password, 10), body.mustChange ? 1 : 0, login.id);
+
+  audit(req, {
+    action: 'update', entity: 'athlete_logins', entityId: login.id,
+    summary: `Athlete password ${body.password ? 'set' : 'generated'} for ${login.email}`,
+  });
+  res.json({ ok: true, password, generated: !body.password, mustChange: !!body.mustChange });
+}));
+
+router.delete('/athlete-logins/:id', adminOnly, asyncHandler(async (req, res) => {
+  const login = db.prepare('SELECT * FROM athlete_logins WHERE id = ?').get(req.params.id);
+  if (!login) throw new ApiError(404, 'That athlete login does not exist.');
+  db.prepare('DELETE FROM athlete_logins WHERE id = ?').run(login.id);
+  audit(req, {
+    action: 'delete', entity: 'athlete_logins', entityId: login.id,
+    summary: `Athlete portal login removed: ${login.email}`,
+  });
+  // The athlete record itself is untouched — only their way of signing in.
+  res.json({ ok: true });
+}));
+
 /* ---- Audit log ------------------------------------------------------ */
 router.get('/audit', requirePermission('audit.read'), (req, res) => {
   const where = ['1 = 1'];

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -31,13 +31,40 @@ export default function Reports() {
     ]).then(([players, teams, tournaments, sports, coaches]) => setOptions({ players, teams, tournaments, sports, coaches }));
   }, []);
 
-  useEffect(() => { setTarget(''); setData(null); }, [kind]);
+  // Each request gets a ticket. A response is only accepted if its ticket is
+  // still the current one, so a slow report that lands after the tab has
+  // changed is discarded rather than rendered by the wrong component — which
+  // used to crash the page and take the whole app down with it.
+  const ticketRef = useRef(0);
+
+  useEffect(() => {
+    ticketRef.current += 1;          // abandon anything already in flight
+    setTarget('');
+    setData(null);
+    setError(null);
+  }, [kind]);
 
   function run() {
     if (!target) return;
-    setData(null); setError(null);
-    api.get(`/reports/${kind}/${target}`).then(setData).catch(setError);
+    const ticket = ticketRef.current + 1;
+    ticketRef.current = ticket;
+    setData(null);
+    setError(null);
+    api.get(`/reports/${kind}/${target}`)
+      .then((payload) => {
+        if (ticketRef.current !== ticket) return;
+        // The payload is tagged with the report it belongs to, so the render
+        // below can never pair one report's data with another's component.
+        setData({ kind, payload });
+      })
+      .catch((err) => {
+        if (ticketRef.current !== ticket) return;
+        setError(err);
+      });
   }
+
+  // Only render a report when its data is the data for this tab.
+  const report = data && data.kind === kind ? data.payload : null;
 
   const list = {
     player: options.players.map((p) => ({ id: p.id, label: `${p.athlete_id} — ${p.display_name || `${p.first_name} ${p.last_name}`}` })),
@@ -83,11 +110,11 @@ export default function Reports() {
 
       <ErrorNote error={error} />
       {target && !data && !error && <Spinner label="Building report" />}
-      {data && kind === 'player' && <PlayerReport data={data} />}
-      {data && kind === 'team' && <TeamReport data={data} />}
-      {data && kind === 'tournament' && <TournamentReport data={data} />}
-      {data && kind === 'sport' && <SportReport data={data} />}
-      {data && kind === 'coach' && <CoachReport data={data} />}
+      {report && kind === 'player' && <PlayerReport data={report} />}
+      {report && kind === 'team' && <TeamReport data={report} />}
+      {report && kind === 'tournament' && <TournamentReport data={report} />}
+      {report && kind === 'sport' && <SportReport data={report} />}
+      {report && kind === 'coach' && <CoachReport data={report} />}
     </>
   );
 }
