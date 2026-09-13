@@ -32,7 +32,7 @@ const { MemoryRouter } = await import('react-router-dom');
 // Sign the demo session in so the pages have a user and permissions.
 const demo = await import('../src/demo/api.js');
 await demo.demoRequest('POST', '/auth/login', {
-  email: 'admin@karwansportsclub.com',
+  email: 'admin@playerarc.local',
   password: 'Karwan@2026',
 });
 

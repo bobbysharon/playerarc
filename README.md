@@ -411,6 +411,19 @@ headline statistics, the latest assessment, training attendance, tracked accurac
 tests. Nothing is weighted or ranked. The point is to make a selection argument checkable, not to
 make the decision.
 
+## Which build am I looking at?
+
+The bottom of the sidebar shows a build timestamp, set when the bundle was compiled. If a change you
+expect is missing, check it first: a browser showing an older stamp is running a cached page or an
+older deployment, not a build with the change missing.
+
+```bash
+npm run build          # local
+npm run build:pages    # then commit docs/ and push, for the GitHub Pages demo
+```
+
+Hard-refresh (Ctrl+Shift+R) after deploying. The Pages demo only changes when you push.
+
 ## The administrator account
 
 `admin@playerarc.local` is the account that guarantees the club can always get

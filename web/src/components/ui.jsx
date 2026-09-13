@@ -699,6 +699,12 @@ export function AppShell({ children }) {
               <LogOut size={15} />
             </button>
           </div>
+
+          {/* Which build this is. Saves guessing whether a browser is showing
+              a stale cache or an old deployment. */}
+          <p className="mt-2 text-center font-mono text-[10px] text-ink-200" title="Build timestamp">
+            build {typeof __BUILD_STAMP__ === 'string' ? __BUILD_STAMP__ : 'dev'}
+          </p>
         </div>
       </aside>
 
