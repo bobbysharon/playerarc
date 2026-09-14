@@ -35,6 +35,7 @@ app.use('/api', require('./routes/academy'));          // drills, session plans,
 app.use('/api', require('./routes/tracking'));         // ball tracking, fitness, templates, selection
 app.use('/api', require('./routes/athlete'));          // athlete portal — separate credentials, own record only
 app.use('/api', require('./routes/booking'));          // grounds, coaches and bookings — mostly public
+app.use('/api', require('./routes/sport-workspace'));  // one module per sport, assembled from its own config
 app.use('/api/training', require('./routes/training'));
 app.use('/api/assessments', require('./routes/assessments'));
 app.use('/api/achievements', require('./routes/achievements'));

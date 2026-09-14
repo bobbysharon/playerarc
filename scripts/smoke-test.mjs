@@ -981,6 +981,57 @@ await check('an athlete changes their own password', async () => {
   return changed.ok && after.status === 200 && after.d.athlete.mustChangePassword === false;
 });
 
+
+/* ---- One module per sport, built from its own configuration ---- */
+await check('every sport has a workspace', async () => {
+  const sports = (await req('/sports')).d.sports;
+  for (const sp of sports) {
+    const r = await req(`/sports/${sp.code}/workspace`);
+    if (r.status !== 200) return false;
+    if (!r.d.presentation || !r.d.summary || !Array.isArray(r.d.teams)) return false;
+  }
+  return sports.length === 7;
+});
+await check('each workspace declares its own visuals', async () => {
+  const cricket = (await req('/sports/cricket/workspace')).d;
+  const football = (await req('/sports/football/workspace')).d;
+  const badminton = (await req('/sports/badminton/workspace')).d;
+  return cricket.presentation.charts.includes('manhattan')
+    && cricket.presentation.periodLabel === 'Innings'
+    && football.presentation.charts.includes('shot_map')
+    && football.presentation.periodLabel === 'Half'
+    && badminton.presentation.charts.includes('point_progression')
+    && badminton.presentation.periodLabel === 'Set';
+});
+await check('leaders come from the sport\'s own headline figures', async () => {
+  const d = (await req('/sports/cricket/workspace')).d;
+  const keys = d.presentation.headline.map((h) => h.key);
+  return d.leaders.length > 0 && d.leaders.every((l) => keys.includes(l.key) && l.leaders.length > 0);
+});
+await check('lower-is-better figures rank the right way round', async () => {
+  const d = (await req('/sports/cricket/workspace')).d;
+  const economy = d.leaders.find((l) => /economy/i.test(l.key));
+  if (!economy) return true;
+  const values = economy.leaders.map((l) => l.value);
+  return economy.lowerIsBetter && values.every((v, i) => i === 0 || v >= values[i - 1]);
+});
+await check('a workspace carries the match analysis for its sport', async () => {
+  const d = (await req('/sports/cricket/workspace')).d;
+  return d.analyses.length > 0 && d.analyses[0].periods.some((p) => p.overByOver?.length > 0);
+});
+await check('ball tracking appears only where the sport has it', async () => {
+  const cricket = (await req('/sports/cricket/workspace')).d;
+  const football = (await req('/sports/football/workspace')).d;
+  return cricket.tracking?.deliveries > 0 && football.tracking === null;
+});
+await check('a coach sees only their own squads in a workspace', async () => {
+  token = coachLogin.d.token;
+  const scoped = await req('/sports/cricket/workspace');
+  token = adminToken;
+  const full = await req('/sports/cricket/workspace');
+  return scoped.status === 200 && scoped.d.teams.length < full.d.teams.length;
+});
+
 /* ---- Single page app is served ---- */
 const origin = BASE.replace('/api', '');
 await check('web app served at /', async () => {

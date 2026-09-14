@@ -551,9 +551,11 @@ const NAV = [
     { to: '/tracking', label: 'Ball tracking', icon: Crosshair, permission: 'performances.read' },
     { to: '/reports', label: 'Reports', icon: FileText, permission: 'reports.read' },
   ] },
+  // Filled from the club's own sports when the shell renders.
+  { group: 'Sports', items: [] },
   { group: 'Club', items: [
     { to: '/announcements', label: 'Announcements', icon: Announce, permission: null },
-    { to: '/sports', label: 'Sports', icon: Shapes, permission: 'sports.read' },
+    { to: '/sports', label: 'All sports', icon: Shapes, permission: 'sports.read' },
     { to: '/users', label: 'Users', icon: UserCog, permission: '*' },
     { to: '/settings', label: 'Settings', icon: SettingsIcon, permission: null },
   ] },
@@ -638,7 +640,16 @@ function GlobalSearch() {
 export function AppShell({ children }) {
   const { user, signOut, can } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [sports, setSports] = useState([]);
   const navigate = useNavigate();
+
+  // The sports a club runs are data, so their navigation entries are built
+  // from the club's own list rather than written into it. A club that adds
+  // handball gets a handball module without a release.
+  useEffect(() => {
+    if (!can('sports.read')) return;
+    api.get('/sports').then((d) => setSports(d.sports || [])).catch(() => setSports([]));
+  }, [can]);
 
   // Admin-only items never fall through to the player/guardian allowance below.
   const allowed = (n) => {
@@ -646,8 +657,17 @@ export function AppShell({ children }) {
     if (!n.permission || can(n.permission)) return true;
     return user?.role === 'player' || user?.role === 'guardian';
   };
+
   const groups = NAV
-    .map((g) => ({ ...g, items: g.items.filter(allowed) }))
+    .map((g) => {
+      if (g.group !== 'Sports') return { ...g, items: g.items.filter(allowed) };
+      return {
+        ...g,
+        items: sports.map((sp) => ({
+          to: `/sports/${sp.code}`, label: sp.name, icon: Shapes, permission: 'sports.read', dot: sp.color,
+        })).filter(allowed),
+      };
+    })
     .filter((g) => g.items.length);
 
   return (

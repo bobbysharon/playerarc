@@ -23,6 +23,7 @@ import Achievements from './pages/Achievements';
 import Rankings from './pages/Rankings';
 import Reports from './pages/Reports';
 import Sports from './pages/Sports';
+import SportWorkspace from './pages/SportWorkspace';
 import Settings from './pages/Settings';
 import Drills from './pages/Drills';
 import Tracking from './pages/Tracking';
@@ -83,6 +84,8 @@ export default function App() {
       <Route path="/rankings" element={<Protected><Rankings /></Protected>} />
       <Route path="/reports" element={<Protected><Reports /></Protected>} />
       <Route path="/sports" element={<Protected><Sports /></Protected>} />
+      {/* Each sport is its own module rather than one crowded screen. */}
+      <Route path="/sports/:code" element={<Protected><SportWorkspace /></Protected>} />
       <Route path="/users" element={<Protected><UserManager /></Protected>} />
       <Route path="/settings" element={<Protected><Settings /></Protected>} />
       <Route path="*" element={<Navigate to="/" replace />} />

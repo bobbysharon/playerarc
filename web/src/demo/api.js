@@ -2799,6 +2799,164 @@ route('GET', /^\/bookings$/, (_, __, query) => {
   };
 });
 
+
+/* ---- One module per sport ---- */
+
+route('GET', /^\/sports\/([^/]+)\/workspace$/, (m) => {
+  const user = requireAuth();
+  // A module is addressed by code, not id — resolveSport handles both.
+  const sport = resolveSport(m[1]);
+  if (!sport) fail(404, 'That sport does not exist.');
+
+  const teamScope = allowedTeamIds(user);
+  const round1 = (n) => (Number.isFinite(n) ? Math.round(n * 10) / 10 : null);
+
+  const teams = filter('teams', (t) => t.sport_id === sport.id && t.is_active
+    && (teamScope === null || teamScope.includes(t.id)))
+    .map((t) => {
+      const played = filter('matches', (x) => x.home_team_id === t.id && x.status === 'completed').length;
+      return {
+        id: t.id, name: t.name, age_group: t.age_group, level: t.level, is_active: t.is_active,
+        squad_size: filter('team_memberships', (tm) => tm.team_id === t.id && !tm.end_date).length,
+        played,
+        won: filter('matches', (x) => x.home_team_id === t.id && x.result === 'win').length,
+      };
+    }).sort((a, b) => a.name.localeCompare(b.name));
+
+  const athletes = filter('player_sports', (ps) => ps.sport_id === sport.id)
+    .map((ps) => ({ ...playerOf(ps.player_id), position: ps.position, is_primary: ps.is_primary }))
+    .filter((p) => p && p.id && inScope(allowedPlayerIds(user), p.id));
+
+  const completed = filter('matches', (x) => x.sport_id === sport.id && x.status === 'completed')
+    .sort((a, b) => String(b.scheduled_at).localeCompare(String(a.scheduled_at)));
+
+  const recent = completed.slice(0, 8).map((x) => ({
+    id: x.id, scheduled_at: x.scheduled_at, venue: x.venue, opponent_name: x.opponent_name,
+    result: x.result, home_score: x.home_score, away_score: x.away_score,
+    result_summary: x.result_summary, team_name: teamName(x.home_team_id),
+    event_count: filter('match_events', (e) => e.match_id === x.id).length,
+  }));
+
+  const upcoming = filter('matches', (x) => x.sport_id === sport.id && String(x.scheduled_at) >= now() && x.status !== 'cancelled')
+    .sort((a, b) => String(a.scheduled_at).localeCompare(String(b.scheduled_at)))
+    .slice(0, 6)
+    .map((x) => ({
+      id: x.id, scheduled_at: x.scheduled_at, venue: x.venue,
+      opponent_name: x.opponent_name, team_name: teamName(x.home_team_id),
+    }));
+
+  const headlineKeys = (sport.config.headline || []).slice(0, 4);
+  const careers = athletes.map((p) => {
+    const c = playerCareer(p.id, sport);
+    return {
+      player: {
+        id: p.id, athleteId: p.athlete_id, name: p.display_name || `${p.first_name} ${p.last_name}`,
+        photoUrl: p.photo_url, position: p.position, status: p.status,
+      },
+      matches: c.matchesPlayed, values: c.career.values,
+    };
+  }).filter((c) => c.matches > 0);
+
+  const leaders = headlineKeys.map((h) => {
+    const key = typeof h === 'string' ? h : h.key;
+    const label = typeof h === 'string' ? key : (h.label || key);
+    const lowerIsBetter = /economy|conceded|error/i.test(key);
+    const ranked = careers
+      .filter((c) => Number.isFinite(Number(c.values[key])))
+      .sort((a, b) => (lowerIsBetter
+        ? Number(a.values[key]) - Number(b.values[key])
+        : Number(b.values[key]) - Number(a.values[key])))
+      .slice(0, 5)
+      .map((c) => ({ player: c.player, value: Math.round(Number(c.values[key]) * 100) / 100, matches: c.matches }));
+    return { key, label, lowerIsBetter, leaders: ranked };
+  }).filter((l) => l.leaders.length);
+
+  const scoredIds = [...new Set(filter('match_events', () => true)
+    .filter((e) => (byId('matches', e.match_id) || {}).sport_id === sport.id)
+    .map((e) => e.match_id))].sort((a, b) => b - a).slice(0, 6);
+
+  const playerMap = new Map(athletes.map((p) => [p.id, p]));
+  const analyses = scoredIds.map((id) => {
+    const events = filter('match_events', (e) => e.match_id === id)
+      .map((e) => ({ ...e, payload: parseJson(e.payload_json, {}) }))
+      .sort((a, b) => a.sequence - b.sequence);
+    const periods = filter('match_periods', (pp) => pp.match_id === id).sort((a, b) => a.sequence - b.sequence);
+    const match = byId('matches', id) || {};
+    const analysis = analyseMatch(sport, events, playerMap, periods);
+    return {
+      matchId: id, scheduledAt: match.scheduled_at, opponent: match.opponent_name,
+      periods: analysis.periods.map((pp) => ({
+        label: pp.period.label, kind: pp.kind, summary: pp.summary,
+        overByOver: pp.overByOver || null, worm: pp.worm || null, phases: pp.phases || null,
+        shotMap: pp.shotMap || null, momentum: pp.momentum || null, progression: pp.progression || null,
+        reasons: pp.reasons || null, rallyBuckets: pp.rallyBuckets || null, wagonWheel: pp.wagonWheel || null,
+      })),
+      overall: analysis.overall.summary,
+    };
+  });
+
+  const tracked = filter('deliveries', (d) => {
+    const s2 = byId('tracking_sessions', d.session_id);
+    return s2 && s2.sport_id === sport.id;
+  }).slice(-900);
+
+  const sessions = filter('training_sessions', (t) => t.sport_id === sport.id);
+  const attendance = filter('training_attendance', (ta) => {
+    const ts = byId('training_sessions', ta.session_id);
+    return ts && ts.sport_id === sport.id;
+  });
+  const eventsConfig = sport.config.events || {};
+
+  return {
+    sport: {
+      id: sport.id, code: sport.code, name: sport.name, color: sport.color,
+      category: sport.category, description: sport.description,
+    },
+    presentation: {
+      charts: eventsConfig.charts || [],
+      periodLabel: eventsConfig.periodLabel || 'Period',
+      periodNoun: eventsConfig.periodNoun || 'period',
+      progressUnit: eventsConfig.progressUnit || null,
+      surface: eventsConfig.surface || null,
+      ballBased: !!eventsConfig.ballBased,
+      pointBased: !!eventsConfig.pointBased,
+      clockBased: !!eventsConfig.clockBased,
+      eventTypes: (eventsConfig.types || []).map((t) => ({ key: t.key, label: t.label })),
+      headline: headlineKeys.map((h) => (typeof h === 'string' ? { key: h, label: h } : { key: h.key, label: h.label || h.key })),
+    },
+    summary: {
+      athletes: athletes.length,
+      activeAthletes: athletes.filter((p) => p.status === 'active').length,
+      squads: teams.length,
+      matchesPlayed: completed.length,
+      wins: filter('matches', (x) => x.sport_id === sport.id && x.result === 'win').length,
+      scoredBallByBall: scoredIds.length,
+      trackedDeliveries: tracked.length,
+      trainingSessions: sessions.length,
+      attendanceRate: attendance.length
+        ? Math.round((attendance.filter((a) => ['present', 'late'].includes(a.status)).length / attendance.length) * 100)
+        : null,
+      averageIntensity: sessions.length
+        ? round1(sessions.reduce((a, t) => a + (t.intensity || 0), 0) / sessions.length)
+        : null,
+    },
+    form: recent.slice(0, 6).map((x) => x.result).filter(Boolean),
+    teams,
+    leaders,
+    recent,
+    upcoming,
+    analyses,
+    tracking: tracked.length ? {
+      deliveries: tracked.length,
+      speed: track.speedSummary(tracked),
+      pitchMap: track.pitchMap(tracked),
+      stumpLine: track.stumpLine(tracked),
+      consistency: track.consistency(tracked),
+      sessions: filter('tracking_sessions', (s2) => s2.sport_id === sport.id).length,
+    } : null,
+  };
+});
+
 /* ---- Training ---- */
 route('GET', /^\/training$/, (_, __, query) => {
   requireAuth();

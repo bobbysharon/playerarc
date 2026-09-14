@@ -367,6 +367,23 @@ and withdrawing it destroys the token so a copied URL genuinely stops working. C
 guardians, documents, assessments and coach notes are never fetched for it, so there is nothing to
 leak. Publish it from the athlete's profile.
 
+## A module per sport
+
+Each sport has its own screen at `/sports/<code>`, listed individually in the navigation, so cricket
+work and badminton work never share a crowded page. The club-wide dashboard still shows everything
+together.
+
+The panels are **assembled from the sport's own configuration**, not written per sport. Which visual
+to draw comes from `events.charts`, what a period is called comes from `periodLabel`, and the leader
+boards come from `headline` — so cricket gets a runs-per-over read with the cumulative line over it,
+football and basketball get a shot map, and the racket sports get a lead-by-rally chart, without the
+page knowing their names. A club that adds handball gets a handball module with no release.
+
+Everything is hand-drawn SVG for the same reason the ball tracker is: the shapes are specific, and a
+chart library flattens them into the same four rectangles.
+
+`web/scripts/render-sport-modules.mjs` renders all seven and asserts each draws its own visual.
+
 ## Ball tracking
 
 Open **Ball tracking** under Analysis. A tracking session is a spell in the nets, a

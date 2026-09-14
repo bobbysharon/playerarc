@@ -509,6 +509,34 @@ await t('a cancelled booking cannot be cancelled again', async()=>{
   catch(e){return e.status===409;}
 });
 
+// one module per sport
+await t('every sport has a workspace', async()=>{
+  const sports=(await demoRequest('GET','/sports')).sports;
+  for(const sp of sports){
+    const d=await demoRequest('GET',`/sports/${sp.code}/workspace`);
+    if(!d.presentation||!d.summary||!Array.isArray(d.teams)) return false;
+  }
+  return sports.length===7;
+});
+await t('each workspace declares its own visuals', async()=>{
+  const c=await demoRequest('GET','/sports/cricket/workspace');
+  const f=await demoRequest('GET','/sports/football/workspace');
+  const b=await demoRequest('GET','/sports/badminton/workspace');
+  return c.presentation.charts.includes('manhattan') && c.presentation.periodLabel==='Innings'
+    && f.presentation.charts.includes('shot_map') && f.presentation.periodLabel==='Half'
+    && b.presentation.charts.includes('point_progression') && b.presentation.periodLabel==='Set';
+});
+await t('leaders use the sport own headline figures', async()=>{
+  const d=await demoRequest('GET','/sports/cricket/workspace');
+  const keys=d.presentation.headline.map(h=>h.key);
+  return d.leaders.length>0 && d.leaders.every(l=>keys.includes(l.key));
+});
+await t('tracking appears only where the sport has it', async()=>{
+  const c=await demoRequest('GET','/sports/cricket/workspace');
+  const f=await demoRequest('GET','/sports/football/workspace');
+  return c.tracking && c.tracking.deliveries>0 && f.tracking===null;
+});
+
 // scoping
 await demoRequest('POST','/auth/login',{email:'coach.cricket@karwansportsclub.com',password:'Karwan@2026'});
 await t('coach scoped athlete list', async()=>{const r=await demoRequest('GET','/players?pageSize=100');return r.total>0&&r.total<46;});
